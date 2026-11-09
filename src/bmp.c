@@ -271,6 +271,10 @@ void refresh_yuv_from_rgb(void)
         return;
     }
 
+    // convert only whole frames: drawing done under BMP_LOCK (menu,
+    // overlays) is either finished or waits until the conversion is done
+    AcquireRecursiveLock(bmp_lock, 0);
+
     // clear it before converting: drawing done meanwhile (other tasks)
     // sets it again, so it gets converted on the next refresh
     ml_refresh_display_needed = 0;
@@ -355,6 +359,8 @@ void refresh_yuv_from_rgb(void)
 #if !defined(CONFIG_INSTALLER) && !(defined(CONFIG_DIGIC_X) && !defined(CONFIG_COMPOSITOR_DEDICATED_LAYER))
     }
 #endif
+
+    ReleaseRecursiveLock(bmp_lock);
 
     // trigger Ximr to render to OSD from RGB buffer
 #ifdef CONFIG_DIGIC_VI
