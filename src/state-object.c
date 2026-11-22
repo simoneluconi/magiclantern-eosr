@@ -329,4 +329,26 @@ void update_state_fps() {
 }
 #endif
 
+#else /* !CONFIG_STATE_OBJECT_HOOKS */
+
+/* Without state object hooks there is no vsync to count, but modules
+ * (e.g. Lua's lv.wait) still need the function. Wait about num_frames
+ * frames at 30 fps, or at the current frame rate if it is known.
+ * Returns 0 if LiveView is not running or closes meanwhile. */
+int wait_lv_frames(int num_frames)
+{
+    if (!lv)
+        return 0;
+
+    int fps = fps_get_current_x1000();
+    int frame_ms = fps ? 1000000 / fps : 34;
+    for (int waited = 0; waited < num_frames * frame_ms; waited += 20)
+    {
+        msleep(20);
+        if (!lv)
+            return 0;
+    }
+    return 1;
+}
+
 #endif

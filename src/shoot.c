@@ -239,6 +239,22 @@ void set_interval_time(int seconds)
 {
     interval_time = seconds;
 }
+#else
+/* No ML intervalometer on this camera (e.g. R6 has Canon's own): modules
+ * such as Lua still link against these. Nothing is running. */
+int get_interval_count()
+{
+    return 0;
+}
+
+int get_interval_time()
+{
+    return 0;
+}
+
+void set_interval_time(int seconds)
+{
+}
 #endif
 
 const char* format_time_hours_minutes_seconds(int seconds)
