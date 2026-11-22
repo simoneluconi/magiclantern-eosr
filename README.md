@@ -42,6 +42,7 @@ this fork is only maintained and tested for the R6.
 | Red display for night / astro, ML colour schemes incl. "Pure Red" | Display | works |
 | Motion detect (pictures through Canon's own shutter path) | Shoot > Motion Detect | works |
 | Lens info, depth of field, auto exposure values | Focus, Expo | works |
+| Screenshots of ML's graphics and the LiveView image (photo mode) | Debug > Screenshot | works |
 | File transfer over USB (PTP), on builds compiled with PTP | see [USB-PTP](docs/r6/USB-PTP.md) | works, advanced |
 
 ## What does not work (yet)

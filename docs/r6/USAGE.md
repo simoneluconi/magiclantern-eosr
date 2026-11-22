@@ -59,6 +59,12 @@ Only features the R6 does not have already are enabled. Every new option starts 
 - Works in photo LiveView. It uses Canon's own shutter path, so pictures and shutdown behave normally.
 - Opening the ML menu stops detection.
 
+### Debug > Screenshot
+
+- Choose it, close the menu and wait for the countdown and the beep. A 720x480 `VRAMn.BMP` is saved in the card root.
+- It contains ML's graphics (menu, bars, overlays) and, in photo LiveView, the LiveView image at ML's lower resolution.
+- Canon's own graphics are not in the file.
+
 ## Settings
 
 - ML settings are stored in `ML/SETTINGS/magic.cfg` on the card. This works on FAT32 and exFAT.
