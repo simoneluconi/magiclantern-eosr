@@ -148,7 +148,8 @@ void focus_calc_dof()
     uint64_t        coc = dof_info_coc * 10; //User CoC in tenths of a micron
 
     const uint64_t  fl = lens_info.focal_len; // already in mm
-    const uint64_t  fd = lens_info.focus_dist * 10 - fl; // convert focus relative to approx principal plane, ie not sensor
+    const unsigned  focus_dist = lens_info.focus_dist; // in cm; 0xFFFF = infinity
+    const uint64_t  fd = focus_dist * 10 - fl; // convert focus relative to approx principal plane, ie not sensor
     
     // If we have no aperture value then we can't compute any of this
     // Also not all lenses report the focus length or distance
@@ -190,16 +191,25 @@ void focus_calc_dof()
     lens_info.hyperfocal = H + fl; // in mm referenced to the sensor
   
     // Calculate near and far dofs
-    lens_info.dof_near = fl + (fd*H-fl2)/(H+fd-2*fl); // in mm relative to the sensor plane
-    if( fd >= H )
+    if (focus_dist == 0xFFFF)
     {
+        // focused at infinity: the limits of the formulas below for fd -> infinity
+        lens_info.dof_near = lens_info.hyperfocal;
         lens_info.dof_far = 1000 * 1000; // infinity
     }
     else
     {
-        /* the result may exceed the int32_t range */
-        uint64_t dof_far = fl + (fd*H - 2*fl*fd + fl2)/(H-fd); // in mm relative to the sensor plane
-        lens_info.dof_far = MIN(dof_far, 1000 * 1000);
+        lens_info.dof_near = fl + (fd*H-fl2)/(H+fd-2*fl); // in mm relative to the sensor plane
+        if( fd >= H )
+        {
+            lens_info.dof_far = 1000 * 1000; // infinity
+        }
+        else
+        {
+            /* the result may exceed the int32_t range */
+            uint64_t dof_far = fl + (fd*H - 2*fl*fd + fl2)/(H-fd); // in mm relative to the sensor plane
+            lens_info.dof_far = MIN(dof_far, 1000 * 1000);
+        }
     }
 
     // update DOF flags

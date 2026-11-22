@@ -2000,9 +2000,14 @@ PROP_HANDLER( PROP_LENS_DYNAMIC_DATA )
     // We compute focus dist using harmonic mean ( 2*Dn*Df / (Dn + Df) )
     // in 64 bits (the product overflows int), and without dividing by zero
     // when the lens reports neither (no focus distance).
+    // far = 0xFFFF: the focus is in the lens' last distance range, up to
+    // infinity (exiftool shows FocusDistanceUpper 655.35 m as "inf");
+    // report it as 0xFFFF, the focus distance ML already shows as infinity.
     const unsigned near = _dynamic->focus_near;
     const unsigned far  = _dynamic->focus_far;
-    if (near + far == 0)
+    if (far == 0xFFFF)
+        lens_info.focus_dist   = 0xFFFF;
+    else if (near + far == 0)
         lens_info.focus_dist   = 0;
     else
         lens_info.focus_dist   = (2ull * near * far) / (near + far);
