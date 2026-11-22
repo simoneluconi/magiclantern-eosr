@@ -33,6 +33,15 @@
 #define STR(x) STRx(x)
 #define STRx(x) #x
 
+/* Address used to return to Canon firmware if the checks below fail.
+ * On DIGIC 7 and later the code at MAIN_FIRMWARE_ADDR is Thumb,
+ * so the low bit must be set for BX to enter it in the right state. */
+#if defined(CONFIG_DIGIC_VII) || defined(CONFIG_DIGIC_VIII) || defined(CONFIG_DIGIC_X)
+#define FIRMWARE_RESET_ADDR STR(MAIN_FIRMWARE_ADDR) " + 1"
+#else
+#define FIRMWARE_RESET_ADDR STR(MAIN_FIRMWARE_ADDR)
+#endif
+
 /* we need this ASM block to be the first thing in the file */
 #pragma GCC optimize ("-fno-reorder-functions")
 
@@ -93,7 +102,7 @@ asm(
     "BX    R3\n"                    /* -> R1 (magic 0xE12FFF13) */
     ".word   autoexec_bin_footer\n" /* -> R2 (footer address) */
     "rombaseaddr:\n"
-    ".word   "STR(MAIN_FIRMWARE_ADDR)"\n"  /* -> R3 (reset address) */
+    ".word   " FIRMWARE_RESET_ADDR "\n"    /* -> R3 (reset address) */
     
     /* embed some human-readable version info */
     /* (visible if you open autoexec.bin in e.g. Notepad or ML file manager) */
@@ -133,7 +142,7 @@ asm(
     "checksum_area:"
     ".word   _start\n"
     ".word   autoexec_bin_checksum_end\n"
-    ".word   "STR(MAIN_FIRMWARE_ADDR)"\n"
+    ".word   " FIRMWARE_RESET_ADDR "\n"    /* -> R10 (reset address) */
     ".word   0x00000000\n"
 
     ".globl blob_start\n"
@@ -173,6 +182,11 @@ static void blink(int n)
 
 static void fail()
 {
+#if defined(CONFIG_DIGIC_X) && !defined(CONFIG_INSTALLER)
+    // disp_init() hangs silently on DIGIC X, so the wrong-firmware
+    // message would never show. Blink the card LED instead (never returns).
+    blink(20);
+#endif
     disp_init();
 
 #ifdef CONFIG_INSTALLER
