@@ -31,6 +31,9 @@ static void arrow_key_step();
 static void preview_contrast_n_saturation_step();
 static void adjust_saturation_level(int);
 static void grayscale_menus_step();
+#ifdef FEATURE_DISPLAY_RED_MATRIX
+static void red_display_step();
+#endif
 void clear_lv_afframe();
 
 void NormalDisplay();
@@ -1148,7 +1151,11 @@ tweak_task( void* unused)
         #if defined(FEATURE_LV_SATURATION) || defined(FEATURE_LV_BRIGHTNESS_CONTRAST) || defined(FEATURE_DIGIC_FOCUS_PEAKING) || defined(FEATURE_LV_CRAZY_COLORS)
         preview_contrast_n_saturation_step();
         #endif
-        
+
+        #ifdef FEATURE_DISPLAY_RED_MATRIX
+        red_display_step();
+        #endif
+
         #ifdef FEATURE_COLOR_SCHEME
         grayscale_menus_step();
         #endif
@@ -2545,6 +2552,188 @@ static void preview_contrast_n_saturation_step()
 #endif
 }
 
+#ifdef FEATURE_DISPLAY_RED_MATRIX
+#ifndef CONFIG_DIGIC_X
+#error "FEATURE_DISPLAY_RED_MATRIX: the output colour matrix is only known on DIGIC X (R6)"
+#endif
+/*
+ * Red display: the colour matrix at the LCD / EVF output gives R = k * Y,
+ * G = B = 0, so the whole image (LiveView, playback, Canon's and ML's
+ * graphics) is shown in red only, for night use. See DISP_MATRIX_ADDR in
+ * consts.h. As with the LV saturation / contrast registers above, Canon
+ * sets its own matrix again whenever it switches an output on, and this
+ * step writes ours again.
+ *
+ * Not saved: OFF at every start. A power cycle resets the display
+ * hardware and Canon loads its standard matrix; nothing to undo at boot.
+ */
+static int red_display = 0;     /* 0 = OFF, 1..4 = index in red_display_k + 1 */
+static const char * red_display_msg = NULL;
+
+static const uint32_t disp_matrix_std[6] = DISP_MATRIX_STD;
+
+/* R = k * Y at 100, 50, 25, 12.5 %: the values andrewpoison tested (8e669dc27) */
+static const uint32_t red_display_k[4] = {
+    DISP_MATRIX_ONE, DISP_MATRIX_ONE / 2, DISP_MATRIX_ONE / 4, DISP_MATRIX_ONE / 8,
+};
+
+/* more stores than this on one output within 10 s: Canon fights us, give up */
+#define RED_DISPLAY_MAX_STORES 10
+
+enum { DM_OFF, DM_BUSY, DM_WRONG_CPU, DM_UNKNOWN, DM_SAME, DM_STORED };
+
+/* -1: Canon's standard matrix, 0..3: our red level, -2: anything else */
+static int disp_matrix_kind(const uint32_t * m)
+{
+    int std = 1;
+    for (int i = 0; i < 6; i++)
+        std &= (m[i] == disp_matrix_std[i]);
+    if (std)
+        return -1;
+
+    if (m[0] || m[1] || m[2] || m[3] || m[5])
+        return -2;
+    for (int k = 0; k < COUNT(red_display_k); k++)
+        if (m[4] == red_display_k[k])
+            return k;
+    return -2;
+}
+
+/*
+ * Output n (0 = LCD, 1 = EVF): set the matrix to 'want' (-1 = Canon's
+ * standard, 0..3 = red level), only if the output shows an image, Canon's
+ * driver is not changing it and the matrix holds Canon's standard or our
+ * red. With IRQs off on the display CPU, as Canon's own setter does, so
+ * Canon cannot change the output between the checks and the stores.
+ */
+static int disp_matrix_update(int n, int want)
+{
+    uint32_t val[6];
+    for (int i = 0; i < 6; i++)
+        val[i] = want < 0 ? disp_matrix_std[i] : 0;
+    if (want >= 0)
+        val[4] = red_display_k[want];
+
+    volatile uint32_t * mat = (volatile uint32_t *) DISP_MATRIX_ADDR(n);
+    uint32_t cur[6];
+    int ret;
+
+    uint32_t old = cli();
+    uint32_t st = MEM(DISP_OUT_STATUS(n));
+    if (get_cpu_id() != DISP_MATRIX_CPU)
+    {
+        ret = DM_WRONG_CPU;
+    }
+    else if (st == 0xFFFFFFFF || (st & DISP_OUT_RUNNING) != DISP_OUT_RUNNING)
+    {
+        ret = DM_OFF;       /* off or switching: the matrix is not even read */
+    }
+    else if (MEM(DISP_UPDATE_MODE(n)) != 0 ||
+             MEM(DISP_OUT_CHANNEL(n)) != (uint32_t) n ||
+             MEM(DISP_CHANNEL_STATE(n)) != DISP_CHANNEL_RUNNING)   /* channel == n here */
+    {
+        ret = DM_BUSY;      /* Canon's driver is (re)configuring this output */
+    }
+    else
+    {
+        for (int i = 0; i < 6; i++)
+            cur[i] = mat[i];
+
+        int kind = disp_matrix_kind(cur);
+        if (kind == -2)
+        {
+            ret = DM_UNKNOWN;
+        }
+        else if (kind == want)
+        {
+            ret = DM_SAME;
+        }
+        else
+        {
+            for (int i = 0; i < 6; i++)
+                mat[i] = val[i];
+            asm volatile ("dsb" ::: "memory");
+            ret = DM_STORED;
+        }
+    }
+    sei(old);
+    return ret;
+}
+
+static void red_display_step()
+{
+    static int dirty = 0;           /* bit n: output n may still show our red */
+    static int stores[2];
+    static int window_start = 0;
+    static int last_setting = 0;
+
+    /* never turned on: no access at all */
+    if (!red_display && !dirty) return;
+
+    /* Canon powers the display down; the next start loads its own matrix */
+    if (ml_shutdown_requested) return;
+    if (!DISPLAY_IS_ON) return;
+
+    int now = get_ms_clock();
+    if (red_display != last_setting)
+    {
+        /* changed in the menu */
+        red_display_msg = NULL;
+        window_start = now - 20000;
+        last_setting = red_display;
+    }
+    if (now - window_start > 10000)
+    {
+        window_start = now;
+        stores[0] = stores[1] = 0;
+    }
+
+    for (int n = 0; n < 2; n++)
+    {
+        if (!red_display && !(dirty & (1 << n)))
+            continue;
+
+        if (stores[n] >= RED_DISPLAY_MAX_STORES)
+        {
+            /* our stores do not hold: turn off; the restore goes on at this rate */
+            if (red_display)
+            {
+                red_display = last_setting = 0;
+                red_display_msg = "Turned off: Canon kept resetting the display colours.";
+                NotifyBox(5000, "Red display turned off:\nCanon kept resetting the display.");
+            }
+            continue;
+        }
+
+        int r = disp_matrix_update(n, red_display - 1);
+        if (r == DM_STORED)
+        {
+            stores[n]++;
+            if (red_display) dirty |= (1 << n);
+        }
+        else if (r == DM_SAME)
+        {
+            if (!red_display) dirty &= ~(1 << n);
+            else red_display_msg = NULL;
+        }
+        else if (r == DM_UNKNOWN && red_display)
+        {
+            red_display_msg = "Display colours are not Canon's standard ones: not changed.";
+        }
+        else if (r == DM_WRONG_CPU && red_display)
+        {
+            red_display_msg = "Not running on the display CPU: not changed.";
+        }
+    }
+}
+
+static MENU_UPDATE_FUNC(red_display_update)
+{
+    if (red_display_msg)
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "%s", red_display_msg);
+}
+#endif
+
 #ifdef FEATURE_LV_BRIGHTNESS_CONTRAST
 static void preview_show_contrast_curve()
 {
@@ -3609,6 +3798,18 @@ static struct menu_entry display_menus[] = {
                 .help2  = "Tip: if it gets really dark, also enable FPS override.",
                 .edit_mode = EM_SHOW_LIVEVIEW,
                 .depends_on = DEP_LIVEVIEW | DEP_PHOTO_MODE,
+            },
+            #endif
+            #ifdef FEATURE_DISPLAY_RED_MATRIX
+            {
+                .name = "Red display",
+                .priv = &red_display,
+                .max = 4,
+                .choices = CHOICES("OFF", "100%", "50%", "25%", "12%"),
+                .update = red_display_update,
+                .icon_type = IT_PERCENT_OFF,
+                .help  = "Whole LCD/EVF image in red only, for night use (astro).",
+                .help2 = "Display only, not the pictures. Not saved: OFF after restart.",
             },
             #endif
     #ifdef FEATURE_CLEAR_OVERLAYS

@@ -26,6 +26,10 @@
 // (ML's own graphics only; Canon's are not changed)
 #define FEATURE_COLOR_SCHEME
 
+// Display > Red display: LCD / EVF output colour matrix in red, see
+// DISP_MATRIX_ADDR in consts.h. Opt-in, OFF at every start.
+#define FEATURE_DISPLAY_RED_MATRIX
+
 // Enable remapping ROM pages to RAM (patch_mmu), as on M50 / 850D.
 // No patches yet: include/platform/mmu_patches.h is empty.
 #define CONFIG_SGI_HANDLERS

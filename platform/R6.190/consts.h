@@ -114,6 +114,43 @@
 // state here (1 = on). Not yet confirmed on the camera.
 #define DISPLAY_IS_ON               (*(int *)0xEF48)
 
+/*
+ * Output colour matrix of the LCD (n = 0) and EVF (n = 1), for
+ * FEATURE_DISPLAY_RED_MATRIX. Addresses, standard values and the red
+ * values were found and tested on this camera by andrewpoison (8e669dc27,
+ * "astro red Full"); the rest is from the 1.9.0 ROM.
+ *
+ * Six words, a 3x3 matrix YCbCr -> G, B, R in s.12 fixed point (15-bit
+ * two's complement), two coefficients per word, written by Canon in
+ * 0xE0214338 (low half first):
+ *   +0x48 = G.Y | G.Cb << 16   +0x4C = G.Cr
+ *   +0x50 = B.Y | B.Cb << 16   +0x54 = B.Cr
+ *   +0x58 = R.Y | R.Cb << 16   +0x5C = R.Cr
+ * The standard set is BT.601 (1.0, -0.344, -0.714 / 1.0, 1.772, 0 /
+ * 1.0, 0, 1.402); it is the only matrix in the ROM's display parameter
+ * blocks (0xE0FC9E20, 0xE1C8871C and three more).
+ */
+#define DISP_MATRIX_ADDR(n)     (0xD282B048 + 0x10000 * (n))
+#define DISP_MATRIX_STD         { 0x7A7E1000, 0x00007493, 0x1C5A1000, 0x00000000, 0x00001000, 0x0000166F }
+#define DISP_MATRIX_ONE         0x1000      /* 1.0 */
+#define DISP_MATRIX_CPU         0           /* Canon's display tasks run on CPU0 (andrewpoison, 8e669dc27) */
+
+/* Output status word, readable at any time (8e669dc27). Canon writes the
+ * matrix only if (status & 0x30) (0xE06B2EA4); 0x37 = clock and output on,
+ * as read while the output shows an image (8e669dc27). */
+#define DISP_OUT_STATUS(n)      (0xD2823000 + 0x10000 * (n))
+#define DISP_OUT_RUNNING        0x37
+
+/* Canon's matrix setter 0xE01B8882 (IRQs off, as cli()) writes the six words
+ * and then calls 0xE020902C, which returns without the latch write to
+ * 0xD282302C only when [DISP_UPDATE_MODE(n)] != 1 and the state of the
+ * output's channel (0xE0209DCA) is 2. In that state Canon's own matrix
+ * update is a plain store, as ours; andrewpoison wrote only there. */
+#define DISP_UPDATE_MODE(n)     (0x1615C8 + 4 * (n))
+#define DISP_OUT_CHANNEL(n)     (0x2F76C + 4 * (n))
+#define DISP_CHANNEL_STATE(ch)  (0x1E1B4 + 4 * ((ch) != 0))
+#define DISP_CHANNEL_RUNNING    2
+
 #define GMT_FUNCTABLE               0xE0CD1B00           // from gui_main_task 0xE04DE3F8 (memcpy 0x1C)
 #define GMT_NFUNCS                  0x7                  // size of table above
 
