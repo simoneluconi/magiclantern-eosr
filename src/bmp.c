@@ -394,6 +394,26 @@ uint32_t indexed2rgb(uint8_t color)
     }
 }
 
+// indexed2rgbLUT as built, saved by bmp_init() before anything can change it.
+// Color schemes (tweaks.c) compute every entry from these defaults, as
+// alter_bitmap_palette() does from LCD_Palette on cameras with palette registers.
+static uint32_t indexed2rgbLUT_default[RGB_LUT_SIZE];
+
+uint32_t indexed2rgb_default(uint8_t color)
+{
+    return indexed2rgbLUT_default[color < RGB_LUT_SIZE ? color : 4];
+}
+
+void indexed2rgb_set(uint8_t color, uint32_t argb)
+{
+    if (color >= RGB_LUT_SIZE)
+        return;
+    if (indexed2rgbLUT[color] == argb)
+        return;
+    indexed2rgbLUT[color] = argb;
+    ml_refresh_display_needed = 1;
+}
+
 #endif
 
 inline void bmp_putpixel_fast(uint8_t *const bvram, int x, int y, uint8_t color)
@@ -1514,6 +1534,7 @@ static void bmp_init(void* unused)
     ASSERT(bmp_lock)
     bvram_mirror_init();
 #ifdef FEATURE_VRAM_RGBA
+    memcpy(indexed2rgbLUT_default, indexed2rgbLUT, sizeof(indexed2rgbLUT_default));
     bmp_vram_indexed = malloc(BMP_VRAM_SIZE);
     // initialise to transparent, this allows us to draw over
     // existing screen, rather than replace it, due to checks

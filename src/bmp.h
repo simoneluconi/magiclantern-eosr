@@ -82,6 +82,10 @@ inline uint8_t *rgb_vram_preinit()
 void refresh_yuv_from_rgb(void);
 void refresh_yuv_from_rgb_task(void *);
 uint32_t indexed2rgb(uint8_t color);
+/** ML's built-in ARGB value of palette entry 'color', before any color scheme */
+uint32_t indexed2rgb_default(uint8_t color);
+/** Replace palette entry 'color' (ML's own pixels only); refreshes the display if it changed */
+void indexed2rgb_set(uint8_t color, uint32_t argb);
 
 void rgba_buffer_clear(void);
 

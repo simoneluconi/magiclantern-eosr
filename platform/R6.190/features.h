@@ -22,6 +22,10 @@
 #define FEATURE_SHOW_TASKS
 #define FEATURE_SHOW_CPU_USAGE
 
+// Display > Advanced settings > Color scheme, on ML's RGBA palette
+// (ML's own graphics only; Canon's are not changed)
+#define FEATURE_COLOR_SCHEME
+
 // Enable remapping ROM pages to RAM (patch_mmu), as on M50 / 850D.
 // No patches yet: include/platform/mmu_patches.h is empty.
 #define CONFIG_SGI_HANDLERS

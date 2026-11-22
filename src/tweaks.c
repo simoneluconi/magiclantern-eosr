@@ -2635,9 +2635,63 @@ static void brightness_saturation_reset()
 
 #ifdef FEATURE_COLOR_SCHEME
 
+#ifdef FEATURE_VRAM_RGBA
+/* RGBA cameras (DIGIC 6 and later) have no palette registers: ML's palette
+ * is indexed2rgbLUT in bmp.c, and only ML's own pixels use it. The color
+ * schemes below work in Y/U/V as on the older cameras, so convert
+ * (BT.601, full range; integer math, so +-2 per channel). */
+static void palette_rgb_to_yuv(uint32_t argb, int * y, int * u, int * v)
+{
+    int r = (argb >> 16) & 0xFF;
+    int g = (argb >>  8) & 0xFF;
+    int b = (argb >>  0) & 0xFF;
+    *y = (  77 * r + 150 * g +  29 * b) / 256;
+    *u = ( -43 * r -  85 * g + 128 * b) / 256;
+    *v = ( 128 * r - 107 * g -  21 * b) / 256;
+}
+
+static uint32_t palette_yuv_to_rgb(int y, int u, int v)
+{
+    int r = COERCE(y + 359 * v / 256, 0, 255);
+    int g = COERCE(y - (88 * u + 183 * v) / 256, 0, 255);
+    int b = COERCE(y + 454 * u / 256, 0, 255);
+    return (r << 16) | (g << 8) | b;
+}
+
+/* Set the RGB part of entry 'color'; the alpha stays the default one.
+ * On RGBA cameras the alpha tells which pixels are ML's (refresh_yuv_from_rgb,
+ * rgba_buffer_clear), so a color scheme must not make an entry transparent
+ * or opaque. Transparent entries are left alone. */
+static void palette_rgba_set(int color, uint32_t rgb)
+{
+    uint32_t alpha = indexed2rgb_default(color) & 0xFF000000;
+    if (!alpha) return;
+
+    /* opaque 0x000000 can show see-through (R6, see indexed2rgbLUT) */
+    if (!(rgb & 0xFFFFFF)) rgb = 0x010101;
+
+    indexed2rgb_set(color, alpha | rgb);
+}
+#endif
+
 void alter_bitmap_palette_entry(int color, int base_color, int luma_scale_factor, int chroma_scale_factor)
 {
-#ifndef CONFIG_VXWORKS
+#ifdef FEATURE_VRAM_RGBA
+    uint32_t base = indexed2rgb_default(base_color);
+    if (luma_scale_factor == 256 && chroma_scale_factor == 256)
+    {
+        /* plain copy, without the rounding of the conversion */
+        palette_rgba_set(color, base & 0xFFFFFF);
+        return;
+    }
+
+    int y, u, v;
+    palette_rgb_to_yuv(base, &y, &u, &v);
+    y = COERCE(y * luma_scale_factor / 256, 0, 255);
+    u = COERCE(u * chroma_scale_factor / 256, -127, 127);
+    v = COERCE(v * chroma_scale_factor / 256, -127, 127);
+    palette_rgba_set(color, palette_yuv_to_rgb(y, u, v));
+#elif !defined(CONFIG_VXWORKS)
     int orig_palette_entry = LCD_Palette[3*base_color + 2];
     int8_t opacity = (orig_palette_entry >> 24) & 0xFF;
     uint8_t orig_y = (orig_palette_entry >> 16) & 0xFF;
@@ -2660,9 +2714,37 @@ void alter_bitmap_palette_entry(int color, int base_color, int luma_scale_factor
 #endif
 }
 
-static void alter_bitmap_palette(int dim_factor, int grayscale, int u_shift, int v_shift)
+/* red: pure red (green = blue = 0) with the brightness of the entry,
+ * e.g. for night use; grayscale and the shifts are then ignored */
+static void alter_bitmap_palette(int dim_factor, int grayscale, int u_shift, int v_shift, int red)
 {
-#ifndef CONFIG_VXWORKS
+#ifdef FEATURE_VRAM_RGBA
+    int identity = dim_factor == 1 && !grayscale && !u_shift && !v_shift && !red;
+
+    /* entry 4 is also used for any color >= RGB_LUT_SIZE, so it is altered too */
+    for (int i = 0; i < RGB_LUT_SIZE; i++)
+    {
+        uint32_t argb = indexed2rgb_default(i);
+        if (identity)
+        {
+            palette_rgba_set(i, argb & 0xFFFFFF);
+            continue;
+        }
+
+        int y, u, v;
+        palette_rgb_to_yuv(argb, &y, &u, &v);
+        y = y / dim_factor;
+        if (red)
+        {
+            /* R >= 2, G = B = 0, as tested on R6 (andrewpoison, a99761aea) */
+            palette_rgba_set(i, MAX(y, 2) << 16);
+            continue;
+        }
+        u = grayscale ? 0 : COERCE(u / dim_factor + u_shift * y / 256, -128, 127);
+        v = grayscale ? 0 : COERCE(v / dim_factor + v_shift * y / 256, -128, 127);
+        palette_rgba_set(i, palette_yuv_to_rgb(y, u, v));
+    }
+#elif !defined(CONFIG_VXWORKS)
 
     if (!bmp_is_on()) return;
 
@@ -2683,6 +2765,14 @@ static void alter_bitmap_palette(int dim_factor, int grayscale, int u_shift, int
         int y = orig_y / dim_factor;
         int u = grayscale ? 0 : COERCE((int)orig_u / dim_factor + u_shift * y / 256, -128, 127);
         int v = grayscale ? 0 : COERCE((int)orig_v / dim_factor + v_shift * y / 256, -128, 127);
+
+        if (red)
+        {
+            /* R = y, G = B = 0, as Y/U/V */
+            u = -43 * y / 256;
+            v = y / 2;
+            y = 77 * y / 256;
+        }
 
         int new_palette_entry =
             ((opacity & 0xFF) << 24) |
@@ -2784,12 +2874,13 @@ static void grayscale_menus_step()
         {
             if (DISPLAY_IS_ON)
             {
-                if      (bmp_color_scheme == 0) alter_bitmap_palette(1,0,0,0);
-                else if (bmp_color_scheme == 1) alter_bitmap_palette(3,0,0,0);
-                else if (bmp_color_scheme == 2) alter_bitmap_palette(1,1,0,0);
-                else if (bmp_color_scheme == 3) alter_bitmap_palette(3,1,0,0);
-                else if (bmp_color_scheme == 4) alter_bitmap_palette(5,0,-170/2,500/2); // strong shift towards red
-                else if (bmp_color_scheme == 5) alter_bitmap_palette(3,0,-170/2,-500/2); // strong shift toward green (pink 5,0,170/2,500/2)
+                if      (bmp_color_scheme == 0) alter_bitmap_palette(1,0,0,0,0);
+                else if (bmp_color_scheme == 1) alter_bitmap_palette(3,0,0,0,0);
+                else if (bmp_color_scheme == 2) alter_bitmap_palette(1,1,0,0,0);
+                else if (bmp_color_scheme == 3) alter_bitmap_palette(3,1,0,0,0);
+                else if (bmp_color_scheme == 4) alter_bitmap_palette(5,0,-170/2,500/2,0); // strong shift towards red
+                else if (bmp_color_scheme == 5) alter_bitmap_palette(3,0,-170/2,-500/2,0); // strong shift toward green (pink 5,0,170/2,500/2)
+                else if (bmp_color_scheme == 6) alter_bitmap_palette(2,0,0,0,1); // pure red, half brightness (night use)
             }
             msleep(50);
         }
@@ -3596,7 +3687,7 @@ static struct menu_entry display_menus[] = {
         },*/
     },
     #endif
-    #if defined(CONFIG_KILL_FLICKER) || defined(FEATURE_SCREEN_LAYOUT) || defined(FEATURE_IMAGE_POSITION) || defined(FEATURE_UPSIDE_DOWN) || defined(FEATURE_IMAGE_ORIENTATION) || defined(FEATURE_AUTO_MIRRORING_HACK) || defined(FEATURE_FORCE_HDMI_VGA)
+    #if defined(CONFIG_KILL_FLICKER) || defined(FEATURE_SCREEN_LAYOUT) || defined(FEATURE_COLOR_SCHEME) || defined(FEATURE_IMAGE_POSITION) || defined(FEATURE_UPSIDE_DOWN) || defined(FEATURE_IMAGE_ORIENTATION) || defined(FEATURE_AUTO_MIRRORING_HACK) || defined(FEATURE_FORCE_HDMI_VGA)
     {
         .name = "Advanced settings",
         .select         = menu_open_submenu,
@@ -3639,8 +3730,8 @@ static struct menu_entry display_menus[] = {
             {
                 .name = "Color scheme",
                 .priv     = &bmp_color_scheme,
-                .max = 5,
-                .choices = (const char *[]) {"Default", "Dark", "Bright Gray", "Dark Gray", "Dark Red", "Dark Green"},
+                .max = 6,
+                .choices = (const char *[]) {"Default", "Dark", "Bright Gray", "Dark Gray", "Dark Red", "Dark Green", "Pure Red"},
                 .help = "Color scheme for bitmap overlays (ML menus, Canon menus...)",
                 .icon_type = IT_DICE_OFF,
             },
