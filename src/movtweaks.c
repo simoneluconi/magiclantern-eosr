@@ -978,6 +978,12 @@ static void change_mov_time_limit(void* priv, int delta)
     // Otherwise, we patch in the new limit.
     uint32_t limit_ms = mov_time_limit == MOV_TIME_LIMIT_OFF ? MOV_TIME_LIMIT_OFF_MS
                                                              : mov_time_limit * 1000;
+    uint32_t hfr_limit_ms = limit_ms;
+#ifdef MVR_TIME_LIMIT_MAX_HFR_SEC
+    // high frame rate has more frames per second: its own maximum (consts.h)
+    if (mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit > MVR_TIME_LIMIT_MAX_HFR_SEC)
+        hfr_limit_ms = MVR_TIME_LIMIT_MAX_HFR_SEC * 1000;
+#endif
     struct patch patches[2] = {
         {
             .addr = (uint8_t *)MVR_TIME_LIMIT_NORMAL_FPS,
@@ -989,7 +995,7 @@ static void change_mov_time_limit(void* priv, int delta)
         {
             .addr = (uint8_t *)MVR_TIME_LIMIT_HIGH_FPS,
             .old_value = 0x6d9e8, // 7m29s
-            .new_value = limit_ms,
+            .new_value = hfr_limit_ms,
             .size = 4,
             .description = "MOV time limit, high FPS"
         }

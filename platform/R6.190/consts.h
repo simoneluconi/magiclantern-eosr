@@ -220,6 +220,9 @@ extern int winsys_bmp_dirty_bit_neg;
 // 15:00 at 119.88p) would crash the camera and leave an unplayable file.
 // Until the tables are patched too, allow only Canon's limit or less.
 #define MVR_TIME_LIMIT_MAX_SEC    (30 * 60)
+// High Frame Rate (119.88p) fills them twice as fast (15:00), so never
+// lengthen it past Canon's 7:29; shorter limits still apply.
+#define MVR_TIME_LIMIT_MAX_HFR_SEC (7 * 60 + 29)
 
 // XCM_New 0xE0174FA4 allocates the XCM on the heap, so there is no fixed address.
 // XCM_GetContext 0xE0175274 returns xcm + idx*0x7A0 + 0x10; context 0 = XCM + 0x10 (as on R5).
