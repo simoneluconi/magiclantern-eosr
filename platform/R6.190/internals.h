@@ -5,6 +5,9 @@
 /** This camera has a DIGIC X chip */
 #define CONFIG_DIGIC_X
 
+/** This camera has a full-frame sensor */
+#define CONFIG_FULLFRAME
+
 /** Digic 6 and up does not have bitmap font in ROM, try to load it from card **/
 #define CONFIG_NO_BFNT
 
