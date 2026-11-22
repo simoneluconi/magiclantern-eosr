@@ -26,15 +26,26 @@
 
 #if !defined(PTR_ALLOC_MEM_START)
 // If AllocMem start is defined, we assume MMU tables should be located there.
-// Otherwise we reserve space in magiclantern.bin:
-// 0x10000 for 1 remapped page, (0x10000 aligned)
+// Otherwise we reserve space in magiclantern.bin for CONFIG_MMU_REMAP_PAGES
+// remapped pages.  calc_mmu_globals() gives each page its own L2 table:
+// 0x10000 per remapped page, (0x10000 aligned)
 //  0x4900 for the L1 table, (0x4000 aligned)
 //   0x300 padding
 //   0x400 per L2 table (0x400 aligned) // need one per 1MB region containing remaps
-// sizeof(struct mmu_L2_page_info)
-static uint8_t generic_mmu_space[MMU_PAGE_SIZE + MMU_L1_TABLE_SIZE
-                                 + 0x300 + MMU_L2_TABLE_SIZE
-                                 + sizeof(struct mmu_L2_page_info)]
+// sizeof(struct mmu_L2_page_info) per L2 table
+//
+// A cam can set CONFIG_MMU_REMAP_PAGES in internals.h when its patches
+// touch more than one 64kB page.  Each page costs about 65kB of RAM.
+#ifndef CONFIG_MMU_REMAP_PAGES
+#define CONFIG_MMU_REMAP_PAGES 1
+#endif
+#if CONFIG_MMU_REMAP_PAGES < 1
+#error "CONFIG_MMU_REMAP_PAGES must be at least 1"
+#endif
+static uint8_t generic_mmu_space[CONFIG_MMU_REMAP_PAGES * (MMU_PAGE_SIZE
+                                                           + MMU_L2_TABLE_SIZE
+                                                           + sizeof(struct mmu_L2_page_info))
+                                 + MMU_L1_TABLE_SIZE + 0x300]
                __attribute__((aligned(0x10000)));
 #endif
 
