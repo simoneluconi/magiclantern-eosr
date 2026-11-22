@@ -916,8 +916,10 @@ static MENU_UPDATE_FUNC(print_mov_time_limit)
     {
         #ifdef MVR_WRITER_PATCHES
         /* the writer is patched too, up to MVR_TIME_LIMIT_MAX_SEC */
+        #ifndef MVR_PLAYBACK_PATCHES
         if (mov_time_limit > 30 * 60)
             MENU_SET_WARNING(MENU_WARN_ADVICE, "Longer clips: the camera may not play them back; use a PC.");
+        #endif
         #else
         MENU_SET_WARNING(MENU_WARN_ADVICE, "Too long recording makes empty files on ExFAT, ok on FAT32");
         #endif
@@ -1002,15 +1004,44 @@ static void change_mov_time_limit(void* priv, int delta)
     if (mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit > MVR_TIME_LIMIT_MAX_HFR_SEC)
         hfr_limit_ms = MVR_TIME_LIMIT_MAX_HFR_SEC * 1000;
 #endif
+    // Above Canon's limit, the movie writer's own limits (MVR_WRITER_PATCHES)
+    // and those of Canon's player for longer clips (MVR_PLAYBACK_PATCHES)
+    // are patched too, if the camera defines them (see consts.h).
+    struct long_clip_patch { uint32_t addr, old_value, new_value, is_instruction; const char * what; };
 #ifdef MVR_WRITER_PATCHES
-    // the movie writer's own limits (see consts.h), needed above Canon's limit
     static const struct { uint32_t addr, old_value, new_value, is_instruction; }
         writer_patches[] = MVR_WRITER_PATCHES;
     #define N_WRITER_PATCHES COUNT(writer_patches)
 #else
     #define N_WRITER_PATCHES 0
 #endif
-    struct patch patches[2 + N_WRITER_PATCHES] = {
+#ifdef MVR_PLAYBACK_PATCHES
+    static const struct { uint32_t addr, old_value, new_value, is_instruction; }
+        playback_patches[] = MVR_PLAYBACK_PATCHES;
+    #define N_PLAYBACK_PATCHES COUNT(playback_patches)
+#else
+    #define N_PLAYBACK_PATCHES 0
+#endif
+    #define N_LONG_CLIP_PATCHES (N_WRITER_PATCHES + N_PLAYBACK_PATCHES)
+    struct long_clip_patch long_clip[N_LONG_CLIP_PATCHES + 1];
+    int n_long_clip = 0;
+#ifdef MVR_WRITER_PATCHES
+    for (int i = 0; i < N_WRITER_PATCHES; i++)
+    {
+        long_clip[n_long_clip++] = (struct long_clip_patch) {
+            writer_patches[i].addr, writer_patches[i].old_value, writer_patches[i].new_value,
+            writer_patches[i].is_instruction, "MOV time limit: movie writer" };
+    }
+#endif
+#ifdef MVR_PLAYBACK_PATCHES
+    for (int i = 0; i < N_PLAYBACK_PATCHES; i++)
+    {
+        long_clip[n_long_clip++] = (struct long_clip_patch) {
+            playback_patches[i].addr, playback_patches[i].old_value, playback_patches[i].new_value,
+            playback_patches[i].is_instruction, "MOV time limit: playback" };
+    }
+#endif
+    struct patch patches[2 + N_LONG_CLIP_PATCHES] = {
         {
             .addr = (uint8_t *)MVR_TIME_LIMIT_NORMAL_FPS,
             .old_value = 0x1b7358, // 29m59s
@@ -1027,25 +1058,25 @@ static void change_mov_time_limit(void* priv, int delta)
         }
     };
     int n_patches = 2;
-#ifdef MVR_WRITER_PATCHES
-    // only above Canon's limit: shorter limits leave the writer as it is
-    int writer = mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit > 30 * 60;
-    for (int i = 0; i < N_WRITER_PATCHES; i++)
+    // only above Canon's limit: shorter limits leave writer and player as they are
+    int long_clips = mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit > 30 * 60;
+    for (int i = 0; i < n_long_clip; i++)
     {
         patches[2 + i] = (struct patch) {
-            .addr = (uint8_t *)writer_patches[i].addr,
-            .old_value = writer_patches[i].old_value,
-            .new_value = writer_patches[i].new_value,
+            .addr = (uint8_t *)long_clip[i].addr,
+            .old_value = long_clip[i].old_value,
+            .new_value = long_clip[i].new_value,
             .size = 4,
-            .is_instruction = writer_patches[i].is_instruction,
-            .description = "MOV time limit: movie writer",
+            .is_instruction = long_clip[i].is_instruction,
+            .description = long_clip[i].what,
         };
-        unpatch_memory(writer_patches[i].addr);
+        unpatch_memory(long_clip[i].addr);
     }
-    if (writer)
-        n_patches += N_WRITER_PATCHES;
-#endif
+    if (long_clips)
+        n_patches += n_long_clip;
     #undef N_WRITER_PATCHES
+    #undef N_PLAYBACK_PATCHES
+    #undef N_LONG_CLIP_PATCHES
     unpatch_memory((uint32_t)patches[0].addr);
     unpatch_memory((uint32_t)patches[1].addr);
     if (mov_time_limit == 30 * 60)

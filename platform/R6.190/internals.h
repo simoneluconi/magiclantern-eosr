@@ -111,8 +111,10 @@
  * except the two TTBR0 L1 entries at +0x4800 / +0x4880 (checked on camera). */
 #define CONFIG_MMU
 
-/** Remapped 64 KiB pages for ROM patches: one reserved at boot, five more
+/** Remapped 64 KiB pages for ROM patches: one reserved at boot, six more
  * taken from Canon's AllocateMemory pool after boot (src/patch_mmu.c).
+ * In use: time limit 0xE074, movie writer 0xE05F / 0xE03A / 0xE05E, player
+ * 0xE04E, heat timer 0xE0D9; one spare.
  * The boot space comes out of DryOS user_mem, only 1.07 MB on R6
  * (0x190098 + 0x112D70, cstart 0xE0100146), which must keep 0x80010 bytes
  * (cstart 0xE0100120; init_task and boot-d678.c check it): with two pages
@@ -121,7 +123,7 @@
  * Putting the pages at the start of the AllocMem region before DryOS set
  * it up (0x12C9000) did not start either. */
 #define CONFIG_MMU_REMAP_PAGES 1
-#define CONFIG_MMU_RUNTIME_PAGES 5
+#define CONFIG_MMU_RUNTIME_PAGES 6
 
 #define CONFIG_TASK_STRUCT_V2_SMP
 #define CONFIG_TASK_ATTR_STRUCT_V5

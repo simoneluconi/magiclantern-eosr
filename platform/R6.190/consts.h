@@ -325,10 +325,10 @@ extern int winsys_bmp_dirty_bit_neg;
 // the tables doubled, 173 MiB with all of these (4K 50p / 59.94p, HFR, FHD).
 // Tested on camera: a 60 min FHD 50p IPB Light (AAC) clip stopped at
 // 59:59 with a 4.46 MB moov and checked fine on a PC (ffprobe, ffmpeg).
-// Canon's player refuses it ("Cannot playback movie"): its moov buffer
-// is about 3 MB.
-// Pages: 0xE05F0000, 0xE03A0000, 0xE05E0000; with the time limit and the
-// heat timer, 5 remapped pages (CONFIG_MMU_RUNTIME_PAGES in internals.h).
+// Canon's player refused it, see MVR_PLAYBACK_PATCHES.
+// Pages: 0xE05F0000, 0xE03A0000, 0xE05E0000; with the time limit, the
+// player and the heat timer, 6 remapped pages (CONFIG_MMU_RUNTIME_PAGES in
+// internals.h).
 #define MVR_WRITER_PATCHES { \
     { 0xE05F0BE4,     864000,    1728000, 0 }, /* 8-byte tables x2 */ \
     { 0xE05F0BE8,     108000,     216000, 0 }, /* capacity x2 */ \
@@ -339,6 +339,26 @@ extern int winsys_bmp_dirty_bit_neg;
     { 0xE05F032C, 0xF5B14659, 0xF5B104D1, 1 }, /* 3rd buffer: 8 << 19 = 4 MB */ \
     { 0xE03A38D8, 0xD2030F80, 0xD2030F00, 1 }, /* cmp 4 -> 8 MB */ \
     { 0xE05EDAF0, 0x0F80F5B0, 0x0F00F5B0, 1 }, /* cmp 4 -> 8 MB */ \
+}
+
+// Canon's player rejects clips longer than 30 min ("Cannot playback
+// movie", no crash): reading a movie's info (mvpGetMovieInfoCBR 0xE04EC1AE
+// -> CheckMovieFileInfo 0xE04EBC90 -> ChkTotalFrame 0xE04EB8A2) allows at
+// most fps x 1800 s of video frames. The moov itself is read into the
+// player's 270 MB region, so its size is not the limit for a single file.
+// MVR_PLAYBACK_PATCHES (applied with MVR_WRITER_PATCHES) raise the frame
+// count limit, in page 0xE04E0000:
+// - 20/24/25/30/50p: cmp.w r1,r3,lsl #3 (r3 = 225 x fps) -> lsl #5, 2 h;
+// - 23.976p: movw r0,#0xA894 -> mov.w r0,#0x40000, 3 h;
+// - 29.97p: movw r0,#0xD2BA -> mov.w r0,#0x40000, 2.4 h;
+// - 59.94p: literal 0x1A574 (loaded only at 0xE04EB91C) -> 0x80000, 2.4 h.
+// Not changed: the in-camera editor (cutting) keeps its own 30 min and 4 MB
+// limits, so long clips may not be trimmed on the camera.
+#define MVR_PLAYBACK_PATCHES { \
+    { 0xE04EB8DC, 0x0FC3EBB1, 0x1F43EBB1, 1 }, /* 20..50p: fps x 1800 -> x 7200 */ \
+    { 0xE04EB8F4, 0x0094F64A, 0x2080F44F, 1 }, /* 23.976p: 43156 -> 262144 */ \
+    { 0xE04EB904, 0x20BAF24D, 0x2080F44F, 1 }, /* 29.97p: 53946 -> 262144 */ \
+    { 0xE04EBBB4, 0x0001A574, 0x00080000, 0 }, /* 59.94p: 107892 -> 524288 */ \
 }
 
 // Longest limit, given MVR_WRITER_PATCHES: 216000 frames last 60:03 at
