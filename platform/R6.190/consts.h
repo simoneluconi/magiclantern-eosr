@@ -65,7 +65,11 @@
 // The R5 value for LV, 0xC048, is Canon's Q screen on R6 (name table
 // 0xE1C585BC, low byte 0x48 = START_UNAVI_MODE; movw + SetGUIRequestMode
 // at 0xE07543B4, compared in the PRESS_UNAVI handler 0xE0790296).
-#define GUIMODE_ML_MENU GUIMODE_MENU
+// While recording, Canon does not switch to its MENU (seen on camera:
+// the GUI mode stayed 0 and the ML menu closed after ~0.5 s), so, as on
+// 5D3 / 50D / 60D..., ML asks for no Canon dialog then and draws its
+// menu over LiveView.
+#define GUIMODE_ML_MENU (RECORDING ? 0 : GUIMODE_MENU)
 
 #define CANON_SHUTTER_RATING 300000 // Canon's official rating for R6
 
