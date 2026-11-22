@@ -2564,10 +2564,12 @@ static void preview_contrast_n_saturation_step()
  * sets its own matrix again whenever it switches an output on, and this
  * step writes ours again.
  *
- * Not saved: OFF at every start. A power cycle resets the display
- * hardware and Canon loads its standard matrix; nothing to undo at boot.
+ * Saved in the config. A power cycle resets the display hardware and
+ * Canon loads its standard matrix, so nothing is left to undo at boot;
+ * a saved level is set again by the first step, after ML has started
+ * (tweak_task waits for it in movtweak_task_init).
  */
-static int red_display = 0;     /* 0 = OFF, 1..4 = index in red_display_k + 1 */
+static CONFIG_INT("display.red", red_display, 0);   /* 0 = OFF, 1..4 = index in red_display_k + 1 */
 static const char * red_display_msg = NULL;
 
 static const uint32_t disp_matrix_std[6] = DISP_MATRIX_STD;
@@ -3809,7 +3811,7 @@ static struct menu_entry display_menus[] = {
                 .update = red_display_update,
                 .icon_type = IT_PERCENT_OFF,
                 .help  = "Whole LCD/EVF image in red only, for night use (astro).",
-                .help2 = "Display only, not the pictures. Not saved: OFF after restart.",
+                .help2 = "Display only, not the pictures or movies.",
             },
             #endif
     #ifdef FEATURE_CLEAR_OVERLAYS

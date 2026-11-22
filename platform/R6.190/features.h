@@ -27,7 +27,7 @@
 #define FEATURE_COLOR_SCHEME
 
 // Display > Red display: LCD / EVF output colour matrix in red, see
-// DISP_MATRIX_ADDR in consts.h. Opt-in, OFF at every start.
+// DISP_MATRIX_ADDR in consts.h. Opt-in (OFF by default), saved.
 #define FEATURE_DISPLAY_RED_MATRIX
 
 // Enable remapping ROM pages to RAM (patch_mmu), as on M50 / 850D.
