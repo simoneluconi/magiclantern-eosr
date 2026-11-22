@@ -30,9 +30,7 @@
  * - GmtFactory lv_start requests the property with value 0, length 4
  *   (0xE011DC16)
  * Per andrewpoison's camera notes, Canon's MENU (also under the ML menu,
- * GUIMODE_ML_MENU) stops LV, so lv is 0 while a menu is open.
- * force_liveview() has no caller in this build (all callers are behind
- * features or modules that R6 does not enable). */
+ * GUIMODE_ML_MENU) stops LV, so lv is 0 while a menu is open. */
 #define CONFIG_LIVEVIEW
 
 /** RECORDING / RECORDING_H264 follow PROP_SHOOTING_TYPE == 4, as on 50D
@@ -65,6 +63,13 @@
  * its info for 2..3 s even on the clean INFO screen (seen on camera):
  * no ML overlays meanwhile (src/zebra.c, get_global_draw). */
 #define CONFIG_LV_INFO_AFTER_MODE_CHANGE_MS 3000
+
+/** force_liveview() does nothing (src/movtweaks.c). It would call
+ * SetGUIRequestMode(0) and fake BGMT_LV, which is a dummy on R6 (gui.h,
+ * "MILC, always LV"); andrewpoison's port avoided SetGUIRequestMode.
+ * Its only caller in this build is motion detect, which calls it when lv
+ * is 0 (e.g. display off with LV stopped); it then simply waits for LV. */
+#define CONFIG_NO_FORCE_LIVEVIEW
 
 /** ML's LV image (get_yuv422_vram) is Canon's FaceYuv buffer, see
  * faceyuv.c: FACEYUV_WIDTH x FACEYUV_HEIGHT UYVY with signed chroma,

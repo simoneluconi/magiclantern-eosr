@@ -205,7 +205,9 @@ static CONFIG_INT( "enable-liveview",  enable_liveview,
 
 void force_liveview()
 {
-#ifdef CONFIG_LIVEVIEW
+/* CONFIG_NO_FORCE_LIVEVIEW: ML cannot start LiveView by itself here (no
+ * real BGMT_LV), callers see lv unchanged */
+#if defined(CONFIG_LIVEVIEW) && !defined(CONFIG_NO_FORCE_LIVEVIEW)
     extern int ml_started;
     while (!ml_started) msleep(50);
 

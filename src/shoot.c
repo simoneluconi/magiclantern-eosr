@@ -5320,13 +5320,21 @@ int take_fast_pictures( int number )
 }
 
 #ifdef FEATURE_MOTION_DETECT
+/* Some cameras have no LV image at times (CONFIG_FACEYUV_LV: e.g. movie
+ * mode, HDMI, both LCD and EVF on): get_spot_yuv_ex() then leaves Y unset
+ * and get_spot_motion() returns 0, so detect nothing without an image. */
+static int md_lv_image_ok()
+{
+    return get_yuv422_vram()->vram != NULL;
+}
+
 static void md_take_pics() // for motion detection
 {
     if (motion_detect_delay > 1) {
         for (int t=0; t<(int)motion_detect_delay; t++) {
             bmp_printf(FONT_MED, 0, 80, " Taking picture in %d.%ds   ", (int)(motion_detect_delay-t)/10, (int)(motion_detect_delay-t)%10);
             msleep(100);
-            int mdx = motion_detect && (liveview_display_idle() || (lv && !DISPLAY_IS_ON)) && NOT_RECORDING && !gui_menu_shown();
+            int mdx = motion_detect && (liveview_display_idle() || (lv && !DISPLAY_IS_ON)) && NOT_RECORDING && !gui_menu_shown() && md_lv_image_ok();
             if (!mdx) return;
         }
     }
@@ -5828,7 +5836,7 @@ shoot_task( void* unused )
         }
 
         // same for motion detect
-        int mdx = motion_detect && (liveview_display_idle() || (lv && !DISPLAY_IS_ON)) && NOT_RECORDING && !gui_menu_shown() && !intervalometer_running;
+        int mdx = motion_detect && (liveview_display_idle() || (lv && !DISPLAY_IS_ON)) && NOT_RECORDING && !gui_menu_shown() && !intervalometer_running && md_lv_image_ok();
         #endif
 
         #ifdef FEATURE_TRAP_FOCUS

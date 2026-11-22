@@ -2245,6 +2245,30 @@ void get_spot_yuv_ex(int size_dxb, int dx, int dy, int* Y, int* U, int* V, int d
     
     unsigned sy = 0;
     int32_t su = 0, sv = 0; // Y is unsigned, U and V are signed
+#ifdef CONFIG_FACEYUV_LV
+    /* The FaceYuv image is read uncached, and motion detect asks for
+     * windows of up to ~355 x 355 pixels about every 11 ms: sample windows
+     * wider than 128 pixels on a grid, at most ~86 x 86 samples. The step
+     * is odd, so U and V columns still alternate. Small windows (the
+     * spotmeter) are read whole, as before. */
+    const int step = 1 + 2 * (dxl / 64);
+    int ny = 0, nu = 0, nv = 0;
+    for( y = ycl - dxl ; y <= ycl + dxl ; y += step )
+    {
+        for( x = xcl - dxl ; x <= xcl + dxl ; x += step )
+        {
+            uint16_t p = vr[ x + y * width ];
+            sy += (p >> 8) & 0xFF;
+            ny++;
+            if (x % 2) { sv += (int8_t)(p & 0x00FF); nv++; }
+            else       { su += (int8_t)(p & 0x00FF); nu++; }
+        }
+    }
+
+    sy /= MAX(ny, 1);
+    su /= MAX(nu, 1);
+    sv /= MAX(nv, 1);
+#else
     // Sum the values around the center
     for( y = ycl - dxl ; y <= ycl + dxl ; y++ )
     {
@@ -2261,6 +2285,7 @@ void get_spot_yuv_ex(int size_dxb, int dx, int dy, int* Y, int* U, int* V, int d
     sy /= dx1_two_plus1 * dx1_two_plus1;
     su /= val;
     sv /= val;
+#endif
 
     *Y = sy;
     *U = su;
@@ -2276,14 +2301,72 @@ void get_spot_yuv(int dxb, int* Y, int* U, int* V)
 static int spm_pre_xcb = -1;
 static int spm_pre_ycb = -1;
 
+#ifdef CONFIG_FACEYUV_LV
+/* There is no second LV buffer to compare the image with
+ * (YUV422_LV_BUFFER_DISPLAY_ADDR is 0). Compare the window with ML's copy
+ * of its luma from the previous call instead, on a grid of at most
+ * SPOT_MOTION_GRID x SPOT_MOTION_GRID pixels (the image is read uncached).
+ * Motion detect calls this more often than Canon delivers frames: if the
+ * buffer is the same one and no sample changed, it is the same frame, and
+ * the previous result is returned. Same scale as below: mean absolute luma
+ * difference x 2. No per-pixel drawing. */
+#define SPOT_MOTION_GRID 64
+static uint8_t spot_motion_prev[SPOT_MOTION_GRID * SPOT_MOTION_GRID];
+static int spot_motion_prev_win[5] = { -1, -1, -1, -1, -1 };    /* x0 y0 x1 y1 step */
+static const void * spot_motion_prev_buf = 0;
+static int spot_motion_prev_d = 0;
+
+static int spot_motion_vs_previous(const uint16_t * vr, int width, int height, int xcl, int ycl, int dxl)
+{
+    const int x0 = MAX(xcl - dxl, 0);
+    const int y0 = MAX(ycl - dxl, 0);
+    const int x1 = MIN(xcl + dxl, width - 1);
+    const int y1 = MIN(ycl + dxl, height - 1);
+    if (x1 < x0 || y1 < y0)
+        return 0;
+
+    /* (x1 - x0) / step < SPOT_MOTION_GRID, same for y */
+    const int step = MAX(x1 - x0, y1 - y0) / SPOT_MOTION_GRID + 1;
+    const int win[5] = { x0, y0, x1, y1, step };
+    const int same_win = !memcmp(win, spot_motion_prev_win, sizeof(win));
+
+    unsigned D = 0;
+    int n = 0;
+    int changed = 0;
+    for (int y = y0; y <= y1; y += step)
+    {
+        for (int x = x0; x <= x1; x += step)
+        {
+            int p = (vr[x + y * width] >> 8) & 0xFF;
+            int dif = ABS(p - spot_motion_prev[n]);
+            D += dif;
+            changed |= dif;
+            spot_motion_prev[n++] = p;
+        }
+    }
+
+    memcpy(spot_motion_prev_win, win, sizeof(win));
+    const void * prev_buf = spot_motion_prev_buf;
+    spot_motion_prev_buf = vr;
+
+    if (!same_win)
+        return spot_motion_prev_d = 0;      /* nothing to compare with yet */
+    if (!changed && vr == prev_buf)
+        return spot_motion_prev_d;          /* no new frame since the last call */
+    return spot_motion_prev_d = 2 * D / n;
+}
+#endif
+
 int get_spot_motion(int dxb, int xcb, int ycb, int draw)
 {
     struct vram_info *  vram = get_yuv422_vram();
 
     if( !vram->vram )
         return 0;
+#ifndef CONFIG_FACEYUV_LV
     const uint16_t*     vr1 = (void*)YUV422_LV_BUFFER_DISPLAY_ADDR;
     const uint16_t*     vr2 = (void*)get_fastrefresh_422_buf();
+#endif
     uint8_t * const     bm = bmp_vram();
     if (!bm) return 0;
     const unsigned      width = vram->width;
@@ -2320,6 +2403,10 @@ int get_spot_motion(int dxb, int xcb, int ycb, int draw)
 		draw_line(xcb - ddxb, ycb + ddxb, xcb - ddxb, ycb - ddxb, COLOR_WHITE);
     }
 
+#ifdef CONFIG_FACEYUV_LV
+    (void) x; (void) y;
+    return spot_motion_vs_previous((const uint16_t *) vram->vram, width, vram->height, xcl, ycl, dxl);
+#else
     unsigned D = 0;
     for( y = ycl - dxl ; y <= ycl + dxl ; y++ )
     {
@@ -2340,6 +2427,7 @@ int get_spot_motion(int dxb, int xcb, int ycb, int draw)
     const int val = (2 * dxl + 1);
     D /= val * val;
     return D;
+#endif
 }
 
 int get_spot_focus(int dxb)

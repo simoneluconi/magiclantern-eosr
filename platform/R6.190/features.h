@@ -54,6 +54,13 @@
 #define FEATURE_FALSE_COLOR
 #define FEATURE_WAVEFORM
 
+// Shoot > Motion Detect (not native on R6). Reads the FaceYuv image, so it
+// only detects in photo LV with the LCD or the EVF alone; takes pictures
+// with lens_take_picture(), i.e. SW1 / SW2 through Canon's shutter switch
+// callbacks (CONFIG_SW12_VIA_CC). Interval and bulb timers are Canon's own
+// on R6, so FEATURE_INTERVALOMETER / FEATURE_BULB_TIMER stay off.
+#define FEATURE_MOTION_DETECT
+
 #undef CONFIG_CRASH_LOG
 #undef CONFIG_PROP_REQUEST_CHANGE
 #undef CONFIG_AUTOBACKUP_ROM
