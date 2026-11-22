@@ -40,6 +40,18 @@
  * The R5 may well be the same; not checked. */
 #define CONFIG_EXPO_CODE768
 
+/** Cam has the DryOS RPC mechanism between cores (_request_RPC, SGI 0xC) */
+#define CONFIG_RPC
+
+/** Cam has MMU (by itself, does nothing, see CONFIG_MMU_REMAP).
+ * Canon's live table at 0xDFFC0000 matches the ROM template at 0xE0000000
+ * except the two TTBR0 L1 entries at +0x4800 / +0x4880 (checked on camera). */
+#define CONFIG_MMU
+
+/** The planned ROM patches are in two 64 KiB pages (1 MiB sections 0xE07
+ * and 0xE0D), so reserve space for two remapped pages and L2 tables. */
+#define CONFIG_MMU_REMAP_PAGES 2
+
 #define CONFIG_TASK_STRUCT_V2_SMP
 #define CONFIG_TASK_ATTR_STRUCT_V5
 

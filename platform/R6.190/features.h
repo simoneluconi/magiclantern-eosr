@@ -18,6 +18,11 @@
 #define FEATURE_SHOW_TASKS
 #define FEATURE_SHOW_CPU_USAGE
 
+// Enable remapping ROM pages to RAM (patch_mmu), as on M50 / 850D.
+// No patches yet: include/platform/mmu_patches.h is empty.
+#define CONFIG_SGI_HANDLERS
+#define CONFIG_MMU_REMAP
+
 #undef CONFIG_CRASH_LOG
 #undef CONFIG_PROP_REQUEST_CHANGE
 #undef CONFIG_AUTOBACKUP_ROM
