@@ -215,7 +215,10 @@ void refresh_yuv_from_rgb(void)
         return;
     }
 
-#if !defined(CONFIG_INSTALLER)
+    // Not on DIGIC X without a dedicated layer: there we draw into Canon's
+    // GUI layer (BMP_LAYER_WIDTH pitch), so a linear copy of BMP_VRAM_SIZE
+    // pixels would garble Canon's whole OSD in the top rows of that layer.
+#if !defined(CONFIG_INSTALLER) && !(defined(CONFIG_DIGIC_X) && !defined(CONFIG_COMPOSITOR_DEDICATED_LAYER))
     if(zebra_should_run()){
         // always draw our stuff, including full alpha
         for (size_t n = 0; n < BMP_VRAM_SIZE; n++){
@@ -262,7 +265,7 @@ void refresh_yuv_from_rgb(void)
             b++;
         }
 #endif
-#if !defined(CONFIG_INSTALLER)
+#if !defined(CONFIG_INSTALLER) && !(defined(CONFIG_DIGIC_X) && !defined(CONFIG_COMPOSITOR_DEDICATED_LAYER))
     }
 #endif
 
@@ -270,7 +273,14 @@ void refresh_yuv_from_rgb(void)
 #ifdef CONFIG_DIGIC_VI
     XimrExe((void *)XIMR_CONTEXT);
 #else
-    take_semaphore(winsys_sem, 0);
+    // Don't wait forever for winsys_sem: if Canon holds it (e.g. while
+    // switching between LCD and EVF), skip XimrExe this time and leave the
+    // refresh pending, so redraw_task retries.
+    if (take_semaphore(winsys_sem, 100) != 0)
+    {
+        ml_refresh_display_needed = 1;
+        return;
+    }
     XimrExe((void *)XIMR_CONTEXT);
     give_semaphore(winsys_sem);
 #endif
