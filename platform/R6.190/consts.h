@@ -214,6 +214,18 @@
 #define CC_SW1_BYTE         0x0DF   // [cc+]: SW1 held; the SW1 callback stores its status here
 #define CC_SW2_BYTE         0x0E0   // [cc+]: SW2 held; the SW2 callback stores its status here
 #define CC_SW_GATE          0x2E0   // [cc+]: != 0: the switch wrapper drops switch events
+// How far a release is (sw12_hold_sw2() in src/lens.c): CC state, set by
+// CC_ChangeCurrentCCState 0xE07020D8, and the release sequence flag, set to 1
+// by ActReleaseSequenceStart (0xE031DD14 / 0xE031DD18), cleared by ActRelSeqComp
+#define CC_STATE            0x294   // [cc+]
+#define CC_RELSEQ_CC        0xB54   // [cc+]: release sequence running
+#define CC_RELSEQ           0x108AC // [0x108A0+0xC]: the same flag, ActRelSeq's copy
+// CC states in andrewpoison's camera traces: 1 / 3 idle, 2 SW1 taken,
+// 4 release accepted (SW2 off here = RELEASE_STOP), 5 SHOOT_START,
+// 6 EXPOSURE_END, 12 bulb
+#define CC_STATE_SHOOT_START  5
+#define CC_STATE_EXPOSURE_END 6
+#define CC_STATE_BULB         12
 
 #define NUM_PICSTYLES 11 // R5, unverified
 

@@ -394,6 +394,11 @@ void SW1(int v, int wait);
 // full shutter
 void SW2(int v, int wait);
 
+#ifdef CONFIG_SW12_VIA_CC
+// one full press with SW1() / SW2(), instead of call("Release")
+void sw12_take_picture();
+#endif
+
 void iso_toggle( void * priv, int sign );
 void shutter_toggle(void* priv, int sign);
 void aperture_toggle( void* priv, int sign);

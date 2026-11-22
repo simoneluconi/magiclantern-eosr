@@ -771,6 +771,8 @@ static void mlu_take_pic()
     SW1(0,50);
     #elif defined(CONFIG_40D)
     call("FA_Release");
+    #elif defined(CONFIG_SW12_VIA_CC)
+    sw12_take_picture();
     #else
     call("Release"); // new cameras (including 500D)
     #endif

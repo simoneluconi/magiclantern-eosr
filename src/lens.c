@@ -932,6 +932,8 @@ int mlu_lock_mirror_if_needed() // called by lens_take_picture; returns 0 if suc
             SW1(0,50);
             #elif defined(CONFIG_40D)
             call("FA_Release");
+            #elif defined(CONFIG_SW12_VIA_CC)
+            sw12_take_picture();
             #else
             call("Release");
             #endif
@@ -1093,6 +1095,8 @@ lens_take_picture(
     call("rssRelease");
     #elif defined(CONFIG_40D)
     call("FA_Release");
+    #elif defined(CONFIG_SW12_VIA_CC)
+    sw12_take_picture();
     #else
     call("Release");
     #endif
@@ -2503,6 +2507,72 @@ static void sw12_set(uint32_t sw, int on)
     }
 
     give_semaphore(sw12_sem);
+}
+
+/* While ML holds SW2: wait until Canon's release has started, the button
+ * moved, ML shuts down, or timeout_ms passed. Not in CC state 4 (release
+ * accepted, not yet started): SW2 off there is a RELEASE_STOP. Committed:
+ * SHOOT_START with the release sequence running (Canon then defers ML's
+ * OFFs to the end of the exposure), EXPOSURE_END, bulb, or a release
+ * sequence that started after SW2 on and is already over (a sequence still
+ * running from an earlier picture does not count: seq_before is the flag
+ * right before SW2 on). From andrewpoison's phase C (iv_committed /
+ * iv_committed_long, 227138ec7 and be6ab8984), without his job / counter
+ * signals; his timeout was 1 s. */
+static int sw12_relseq(uint32_t cc)
+{
+    return MEM(cc + CC_RELSEQ_CC) || MEM(CC_RELSEQ);
+}
+
+static void sw12_hold_sw2(int seq_before, int timeout_ms)
+{
+    int t0 = get_ms_clock();
+    int seq_prev = seq_before;
+    int seq_seen = 0;       /* a sequence started while ML held SW2 */
+
+    for (;;)
+    {
+        uint32_t cc = sw12_cc(0);
+        if (!cc || !(sw12_held & SW12_SW2) || !sw12_bytes_ok(cc))
+            break;
+
+        int state = MEM(cc + CC_STATE);
+        int seq_cc = MEM(cc + CC_RELSEQ_CC);
+        int seq = sw12_relseq(cc);
+        if ((state == CC_STATE_SHOOT_START && seq_cc == 1)
+            || state == CC_STATE_EXPOSURE_END || state == CC_STATE_BULB)
+            break;
+        if (seq_seen && !seq)
+            break;
+        if (seq_prev == 0 && seq)
+            seq_seen = 1;
+        seq_prev = seq;
+
+        int dt = get_ms_clock() - t0;
+        if (ml_shutdown_requested || dt >= timeout_ms || dt < 0)
+            break;
+        msleep(10);
+    }
+}
+
+/* One full press of the shutter button, for lens_take_picture() and the
+ * MLU paths instead of call("Release"). On R6, "Release" is a factory
+ * eventproc: it marks the job as a factory job (ShutterMode 10), which
+ * only the factory PC's receipt closes, so power-off waits for "remaining
+ * pictures 1" until the battery is pulled (andrewpoison, 227138ec7). The
+ * press goes through Canon's normal button path instead. Sequence as in
+ * his port: SW1 on, 100 ms, SW2 on, SW2 off, SW1 off back to back. */
+void sw12_take_picture()
+{
+    SW1(1, 100);
+
+    uint32_t cc = sw12_cc(0);
+    int seq_before = cc ? sw12_relseq(cc) : 1;
+    SW2(1, 0);
+    sw12_hold_sw2(seq_before, 1000);
+
+    SW2(0, 0);
+    SW1(0, 0);
 }
 #endif
 
