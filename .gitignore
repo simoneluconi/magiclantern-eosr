@@ -76,4 +76,21 @@ modules/*/*/build
 developer_guide/developer_guide.html
 developer_guide/developer_guide.pdf
 
+# R6 fork: keep Canon firmware, camera files and card backups out of the repository.
+# (*.bin above already covers lower case; these are the camera's upper case names.)
+# Never commit ROM dumps (ROM0.BIN, ROM1.BIN, gang*.bin), firmware or decompiled Canon code.
+*.BIN
+*.ROM
+*.FIR
+*.rep/
+*.MP4
+*.mp4
+*.CR3
+*.cr3
+*.CR2
+*.cr2
+*.DAT
+ML/SETTINGS/
+BOOTFLAG.TXT
+
 syntax: regexp
