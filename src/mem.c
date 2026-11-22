@@ -283,6 +283,10 @@ static struct mem_allocator allocators[] = {
     // ASSERT: pMessage->pAddress == (PVOID)COMPOSITION_WORK_TOP_ADDRESS( (UINT32)this->pMemMgrAddress )
     // and:
     // ASSERT: GetCurrentState( hStateObject ) == ST_NORMAL_SRM
+#if defined(CONFIG_MEMORY_SHOOT_MALLOC_NOT_WORKING)
+    // Allocating from it gives Err 70 on some cams (R6: from LiveView and
+    // in PC connection mode). Large buffers come from AllocateMemory then.
+#else
     {
         .name = "shoot_malloc",
         .malloc = _shoot_malloc,
@@ -307,6 +311,7 @@ static struct mem_allocator allocators[] = {
         .minimum_alloc_size = 64 * 1024,
         .minimum_free_space = 256 * 1024,
     },
+#endif
 
 #if defined(CONFIG_MEMORY_SRM_NOT_WORKING)
     // SJE FIXME SRM is not understood well enough to function on these cams,

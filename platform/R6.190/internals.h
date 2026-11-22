@@ -17,6 +17,13 @@
  */
 #define CONFIG_MEMORY_SRM_NOT_WORKING
 
+/** shoot_malloc (AllocateMemoryResource / AllocateContinuousMemoryResource)
+ * gives Err 70 on R6: in PC connection mode (PTP downloads, see
+ * src/ptp-chdk.c) and from photo LiveView (a 1 MB screenshot buffer).
+ * ML's large buffers come from AllocateMemory instead (14.5 MB pool,
+ * about 5 MB free after boot). */
+#define CONFIG_MEMORY_SHOOT_MALLOC_NOT_WORKING
+
 /* malloc struct at MALLOC_STRUCT_ADDR uses the V2 layout
  * (get_malloc_info 0xE037C234 reads +4, +8, +0x18, +0x1C, +0x20) */
 #define CONFIG_MALLOC_STRUCT_V2
