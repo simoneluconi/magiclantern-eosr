@@ -29,6 +29,10 @@ struct mmu_config
                                         // easily track which pages are mapped where.
     uint32_t max_64k_pages_remapped;
     uint8_t *phys_mem_pages;
+    // CONFIG_MMU_RUNTIME_PAGES: more 64kB pages, taken from Canon's
+    // AllocateMemory after boot; used once phys_mem_pages are all in use.
+    uint32_t runtime_64k_pages;
+    uint8_t *runtime_mem_pages;
 };
 
 extern struct mmu_config global_mmu_conf; // in patch_mmu.c
