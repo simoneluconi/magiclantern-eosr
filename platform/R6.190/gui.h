@@ -9,11 +9,15 @@
  * Buttons: press = even code, unpress = code + 1; arg is 1 in both cases.
  * Dials: one code per direction, arg = number of clicks.
  * Cross-checked with gui_massive_event_loop 0xE059193C (jump table 0xE0592208) and
- * the dialog event names it produces. Same values as R5 1.5.2 where R5 defines them.
+ * the dialog event names it produces. Same values as R5 1.5.2 where R5 defines them,
+ * except the rear dial direction (WHEEL_UP / WHEEL_DOWN are swapped on R5).
  */
 
-#define BGMT_WHEEL_DOWN              0x00 // QCD2 (rear, around SET), SwSub_Dial delta<0
-#define BGMT_WHEEL_UP                0x01 // SwSub_Dial delta>0; arg = number of clicks
+/* QCD2 (rear dial, around SET): clockwise is WHEEL_DOWN, as in Canon's
+ * menus and on other cams (ML moves down / increments on WHEEL_DOWN).
+ * Seen on the camera: with these two swapped, clockwise moved ML's menu up. */
+#define BGMT_WHEEL_UP                0x00 // SwSub_Dial delta<0, counter-clockwise
+#define BGMT_WHEEL_DOWN              0x01 // SwSub_Dial delta>0, clockwise; arg = number of clicks
 
 // 0x02/0x03: SUB2 dial, no switch callback exists on R6
 // 0x04/0x05: QCD1 (top, "3rd dial"), Sw3rd_Dial; not used by ML
