@@ -35,7 +35,7 @@ this fork is only maintained and tested for the R6.
 | Feature | Where | State |
 |---|---|---|
 | Loading ML from the card (slot 1 or 2, FAT32 or exFAT), ML menu, saving settings | Trash button opens the menu | works |
-| **Clip length up to 59:59** instead of 29:59 (Canon's movie writer is patched too) | Movie > MOV/MP4 time limit | works, tested with a 60 min clip |
+| **Clip length up to 59:59** instead of 29:59 (Canon's movie writer and player are patched too) | Movie > MOV/MP4 time limit | works, a 60 min clip records and plays back on the camera |
 | **Heat timer** 2x / 3x / 4x: slows Canon's time-based 4K heat limit; the temperature sensors still protect the camera | Movie > Heat timer | works |
 | Temperatures, heat timer and budget, in °C or °F | Debug > Internal Temp, LiveView top bar | works |
 | Spotmeter, false color, waveform | Overlay | works in photo mode |
@@ -48,7 +48,7 @@ this fork is only maintained and tested for the R6.
 
 - **Overlays in movie mode**: spotmeter, false color and waveform only draw in photo LiveView.
 - **ML menu while recording**: it closes again right away (Canon's menu can't be opened under it while recording).
-- **Long clips on the camera**: clips longer than about 40-45 minutes play on a PC but the camera says "Cannot playback movie".
+- **Trimming long clips on the camera**: clips over 30 minutes play back on the camera, but Canon's movie editor keeps its own limits.
 - **Modules** (dual ISO, MLV / RAW video, Lua scripts...) are not included.
 - ML overlays are not shown in the viewfinder.
 - Zebras, focus peaking, histogram, intervalometer and bulb timer are **not enabled on purpose**: the R6 has its own.

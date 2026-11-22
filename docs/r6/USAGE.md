@@ -26,8 +26,9 @@ Only features the R6 does not have already are enabled. Every new option starts 
 
 - Choices: shorter limits, **29:59 (Canon)**, **45 min** and **59:59**. High Frame Rate (100/120p) stays at Canon's 7:29.
 - Above 29:59 ML also patches Canon's movie writer (its per-clip tables and the 8 MB index buffer). Without that the camera would stop with Err 70 after the limit, or leave an unplayable file.
-- Tested: a 60-minute FHD 50p clip on exFAT stopped at 59:59 and played fine on a PC.
-- **Long clips may not play back on the camera** ("Cannot playback movie"). Canon's player has a smaller index buffer, so this starts at roughly 40-45 minutes. The file itself is fine: copy it to a PC.
+- It also lets Canon's player open clips over 30 minutes; without that the camera says "Cannot playback movie".
+- Tested: a 60-minute FHD 50p clip on exFAT stopped at 59:59, played fine on a PC and plays back on the camera.
+- Don't trim clips over 30 minutes on the camera: Canon's movie editor keeps its own limits.
 - The limit can't be changed while recording. It takes effect from the next clip.
 - Heat still applies: in 4K the heat timer (below) or the temperature sensors may stop the clip earlier.
 

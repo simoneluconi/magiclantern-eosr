@@ -41,7 +41,7 @@ Remove the battery. Then report in the forum thread exactly what you did before 
 
 ## "Cannot playback movie" on a long clip
 
-Clips longer than about 40-45 minutes, recorded with the MOV/MP4 time limit above 29:59, have a larger index than Canon's player accepts. The camera shows the message and carries on normally. The file is fine: play it on a PC.
+Canon's player rejects clips over 30 minutes unless ML patches it. ML does that only while **MOV/MP4 time limit** is above 29:59. If you set it back to 29:59, long clips recorded earlier show the message again. The camera carries on normally, and the file is fine: play it on a PC, or set the limit above 29:59 again.
 
 ## Err 70 at the end of a long recording
 
