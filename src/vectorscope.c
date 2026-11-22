@@ -249,6 +249,12 @@ vectorscope_draw_image(uint32_t x_origin, uint32_t y_origin)
             }
         }
     }
+
+#ifdef FEATURE_VRAM_RGBA
+    /* drawn into ML's indexed buffer: have redraw_task show it
+     * (as for false color and the waveform) */
+    ml_refresh_display_needed = 1;
+#endif
 }
 
 static MENU_UPDATE_FUNC(vectorscope_update)

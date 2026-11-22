@@ -53,6 +53,8 @@
 #define FEATURE_SPOTMETER
 #define FEATURE_FALSE_COLOR
 #define FEATURE_WAVEFORM
+// reads the same FaceYuv image; signed chroma, as vectorscope.c expects
+#define FEATURE_VECTORSCOPE
 
 // Shoot > Motion Detect (not native on R6). Reads the FaceYuv image, so it
 // only detects in photo LV with the LCD or the EVF alone; takes pictures
