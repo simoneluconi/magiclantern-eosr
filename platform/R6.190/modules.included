@@ -1,2 +1,5 @@
 # Module names in this file will be included in the cam magiclantern.zip
-# none for now: bench needs take_screenshot, file_man can delete files
+# file_man: file browser (it can also delete files, on request only)
+# lua: scripting; some calls need property writes, which R6 refuses
+file_man
+lua
