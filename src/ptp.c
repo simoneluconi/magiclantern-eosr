@@ -2,8 +2,14 @@
 #include "dryos.h"
 
 int recv_ptp_data(struct ptp_context *data, char *buf, int size)
-	// repeated calls per transaction are ok
+	// repeated calls per transaction are ok, except with CONFIG_PTP_RECV_ONCE
 {
+#ifdef CONFIG_PTP_RECV_ONCE
+	/* Canon's handlers receive the whole data phase with a single
+	 * recv_data() call; split reads crash the camera (ERR70). */
+	data->recv_data(data->handle,buf,size,0,0);
+	return 1;
+#endif
 	while ( size >= BUF_SIZE )
 	{
 		data->recv_data(data->handle,buf,BUF_SIZE,0,0);

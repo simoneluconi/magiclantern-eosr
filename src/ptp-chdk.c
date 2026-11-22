@@ -444,6 +444,51 @@ PTP_HANDLER( PTP_OC_CHDK, 0 )
 
                 s = context->get_data_size(context->handle);
 
+#ifdef CONFIG_PTP_RECV_ONCE
+                /* receive the whole data phase at once:
+                 * u32 name length, name, file contents */
+                char *all = (char *) fio_malloc(s);
+                if ( all == NULL || s < 4 )
+                {
+                    if (all) fio_free(all);
+                    msg.id = PTP_RC_GeneralError;
+                    break;
+                }
+                recv_ptp_data(context, all, s);
+                memcpy(&fn_len, all, 4);
+                if ( fn_len <= 0 || fn_len > s - 4 )
+                {
+                    fio_free(all);
+                    msg.id = PTP_RC_GeneralError;
+                    break;
+                }
+                fn = (char *) fio_malloc(fn_len+1);
+                if ( fn == NULL )
+                {
+                    fio_free(all);
+                    msg.id = PTP_RC_GeneralError;
+                    break;
+                }
+                memcpy(fn, all + 4, fn_len);
+                fn[fn_len] = '\0';
+                s -= 4 + fn_len;
+
+                FIO_RemoveFile(fn);
+                f = FIO_CreateFile(fn);
+                fio_free(fn);
+                if (!f)
+                {
+                    fio_free(all);
+                    msg.id = PTP_RC_GeneralError;
+                    break;
+                }
+                if ( s > 0 && FIO_WriteFile(f, all + 4 + fn_len, s) != s )
+                    msg.id = PTP_RC_GeneralError;
+                FIO_CloseFile(f);
+                fio_free(all);
+                break;
+#endif
+
                 recv_ptp_data(context,(char *) &fn_len,4);
                 s -= 4;
 
