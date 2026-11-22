@@ -3920,6 +3920,17 @@ BMP_LOCK (
  * TODO: Code should probably be expanded by other apps that we want to mess
  *       with (PlayMain, ShootOlcApp, PlayMovieGuideApp?)
  */
+#if defined(CONFIG_DIGIC_X) && !defined(CONFIG_COMPOSITOR_DEDICATED_LAYER)
+    /* We draw into Canon's GUI layer. Don't ask Canon to repaint it from
+     * here: this runs in GuiMainTask, and dialog_redraw() would run Canon's
+     * VMIX_TransferRectangleToVram there, which normally runs in CtrlSrv
+     * and is not reentrant (suspected cause of a hang on R6 when switching
+     * between LCD and EVF, PROP_LV_OUTPUT_TYPE -> redraw()). Erase only our
+     * own pixels and show the result; Canon repaints its own GUI elements
+     * when they change. */
+    clrscr();
+    ml_refresh_display_needed = 1;
+#else
     extern struct dialog* LiveViewApp_dialog;
     if(LiveViewApp_dialog)
     {
@@ -3929,6 +3940,7 @@ BMP_LOCK (
     {
         clrscr(); // out of luck, fallback
     }
+#endif
 #else
 
     //~ if (disable_redraw) 
