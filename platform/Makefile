@@ -349,6 +349,7 @@ ML_SRC_OBJS_00 = \
     gui-common.o \
     chdk-gui_draw.o \
     movtweaks.o \
+    heat_timer.o \
     menuhelp.o \
     menuindex.o \
     focus.o \
