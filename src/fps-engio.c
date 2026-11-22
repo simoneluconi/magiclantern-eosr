@@ -919,6 +919,11 @@ int fps_get_current_x1000()
 {
     if (!lv)
         return 0;
+#ifndef FPS_REGISTER_B
+    // FPS timers not known on this camera (get_fps_register_b() is a
+    // placeholder): no value rather than a made-up one.
+    return 0;
+#endif
     int fps_timer = (get_fps_register_b() & 0xFFFF) + 1;
     int fps_x1000 = TIMER_TO_FPS_x1000(fps_timer);
     return fps_x1000;
