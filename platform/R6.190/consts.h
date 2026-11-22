@@ -73,6 +73,43 @@
 #define EFIC_CELSIUS ((int)efic_temp - 128)
 #define EFIC_TEMP_HELP "Canon's temperature sensor A (I2C). Location not known."
 
+// Movie heat timer (FEATURE_MOVIE_HEAT_TIMER, src/heat_timer.c).
+// Canon's time-based heat model (0xE04E902A, once per second) keeps a
+// budget from 0 to 0xFFFF and drains it by 0xFFFF / seconds (integer
+// division) per second. The seconds come from this ROM table, read in
+// place (literal pools 0xE04E8DC8, 0xE04E9378, 0xE04E9794; no RAM copy).
+// Each row (0x2C bytes) starts with a 5-byte mode key (state, size
+// class, frame rate class) matched by 0xE04E8CE6. Two 8-byte parts
+// follow: standby (+0x08) and recording (+0x10, used while
+// PROP_SHOOTING_TYPE is 4). Each part has the seconds (32 bit), then a
+// "stop when empty" byte and, at +2, a "drain" byte. Only the seconds
+// are patched. Keys, flags and the sensor thresholds stay untouched.
+#define HEAT_TABLE_ADDR         0xE0D9CEA4
+#define HEAT_TABLE_ROWS         24
+#define HEAT_TABLE_ROW_SIZE     0x2C
+#define HEAT_TABLE_STANDBY      0x08
+#define HEAT_TABLE_RECORDING    0x10
+
+// Canon's seconds per row, {standby, recording}, checked before patching.
+// Rows 2 and 3 (keys 13 04 0A / 13 04 09) are most likely 4K 50/60p and
+// 4K <= 30p: they match Canon's published 30 / 40 min limits. Row 1
+// (key 16) is used while PROP_GUI_STATE is not 0, 6, 9 or 10 (0xE04E83D4),
+// e.g. in a menu.
+#define HEAT_TABLE_SECONDS { \
+    {  4500,  4500 }, { 33000, 33000 }, {  1800,  1798 }, {  3600,  2400 }, \
+    {  4800,  3000 }, {  3900,  2700 }, {  7500,  7500 }, {  2700,  2100 }, \
+    {  3900,  3300 }, {  2700,  2100 }, {  3900,  3300 }, {  4500,  1798 }, \
+    {  3600,  2400 }, {  9600,  3000 }, {  7500,  2700 }, {  7500,  7500 }, \
+    {  4200,  2100 }, {  3900,  3300 }, {  4200,  2100 }, {  3900,  3300 }, \
+    {  3900,  2700 }, {  2700,  2100 }, { 12000, 12000 }, { 23100, 23100 }, \
+}
+
+// Largest patched value. 0xE04E95D6 and 0xE04E965C compute the remaining
+// time as budget * seconds / 0xFFFF in 32 bits, which stays below 2^31
+// up to 0x7FFF s. The drain per second is then at least 2, never 0.
+// Rows already above it (33000 s) are left as they are.
+#define HEAT_TABLE_SECONDS_MAX  0x7FFF
+
 // DispOperator_PropertyMasterSetDisplayTurnOffOn 0xE0751460 caches the requested
 // state here (1 = on). Not yet confirmed on the camera.
 #define DISPLAY_IS_ON               (*(int *)0xEF48)
