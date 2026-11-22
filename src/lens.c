@@ -3011,6 +3011,48 @@ static LVINFO_UPDATE_FUNC(temp_update)
   #endif
 }
 
+#ifdef FEATURE_SHOW_TEMP_SENSORS
+/* Canon's movie heat timer, see get_heat_remain_seconds() */
+static LVINFO_UPDATE_FUNC(heat_timer_update)
+{
+    LVINFO_BUFFER(8);
+
+    if (!is_movie_mode())
+        return;
+
+    int remain = get_heat_remain_seconds();
+    if (remain < 0 || remain == HEAT_REMAIN_NO_LIMIT)
+        return;
+
+    /* Canon rounds it down to 5 minutes, to 1 minute below 5 minutes */
+    int minutes = remain / 60;
+    snprintf(buffer, sizeof(buffer), "%dmin", minutes);
+    if (minutes < 5)
+    {
+        item->color_bg = COLOR_RED;
+    }
+    else if (minutes <= 10)
+    {
+        item->color_bg = COLOR_ORANGE;
+    }
+}
+
+/* the heat budget behind the timer, see get_heat_budget_percent() */
+static LVINFO_UPDATE_FUNC(heat_budget_update)
+{
+    LVINFO_BUFFER(8);
+
+    if (!is_movie_mode())
+        return;
+
+    int percent = get_heat_budget_percent();
+    if (percent < 0 || get_heat_remain_seconds() == HEAT_REMAIN_NO_LIMIT)
+        return;
+
+    snprintf(buffer, sizeof(buffer), "%d%%", percent);
+}
+#endif
+
 static LVINFO_UPDATE_FUNC(mvi_number_update)
 {
     LVINFO_BUFFER(12);
@@ -3401,6 +3443,21 @@ static struct lvinfo_item info_items[] = {
         .update = temp_update,
         .priority = 1,
     },
+    #ifdef FEATURE_SHOW_TEMP_SENSORS
+    /* next to the temperature; empty outside movie mode */
+    {
+        .name = "Heat timer",
+        .which_bar = LV_TOP_BAR_ONLY,
+        .update = heat_timer_update,
+        .priority = 1,
+    },
+    {
+        .name = "Heat budget",
+        .which_bar = LV_TOP_BAR_ONLY,
+        .update = heat_budget_update,
+        .priority = -1,
+    },
+    #endif
     {
         .name = "MVI number",
         .which_bar = LV_TOP_BAR_ONLY,
