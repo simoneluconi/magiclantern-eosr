@@ -48,7 +48,7 @@ DATA_PTR(    0x1010,  current_interrupt)                  // from interrupt hand
 DATA_PTR(    0x1028,  current_task)                       // from task switch/scheduler start 0xE07C16C2 str task,[0x1028]; pointer to the current task structure
 DATA_PTR(    0x4100,  task_max)                           // entry in SysConfig struct 0x40EC+0x14 (0xE01652F0 copies dryos_init_info.task_max); used by task pool init 0xE011E810
 THUMB_FN(0xe07c1cda,  msleep)                             // SystemIF::KerSys.c; registered as eventproc "SleepTask" (0xE011271A)
-THUMB_FN(0xe07b93a6,  task_create)                        // SystemIF::KerTask.c; used to start TaskMain (0xE0100B46), GuiMainTask (0xE04DE4C6)
+THUMB_FN(0xe07b93a6,  _task_create)                       // SystemIF::KerTask.c; used to start TaskMain (0xE0100B46), GuiMainTask (0xE04DE4C6); wrapped by task_create() in function_overrides.c
 THUMB_FN(0xe07b95be,  task_create_ex)                     // SystemIF::KerTask.c; as task_create, plus a 6th arg: the CPU (asserts if > 1). Called from 0xE025CE20, 0xE07D5C48, 0xE07DAB36
 
 /** File I/O **/

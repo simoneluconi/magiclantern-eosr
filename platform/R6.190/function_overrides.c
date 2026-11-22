@@ -216,3 +216,26 @@ unsigned int UnLockEngineResources(struct LockEntry *lockEntry)
 {
     return 0;
 }
+
+/*
+ * Task stacks come from DryOS system memory, and on R6 a 64 KiB stack does
+ * not fit any more: the lua module's tasks (0x10000) made Canon fail with
+ * Err 70, at module load and on "Run Script". With 16 KiB, Lua loaded;
+ * ML's own 32 KiB tasks (menu_redraw_task, livev_loprio_task) run fine.
+ * Cap every stack ML or a module asks for at 32 KiB (TASK_STACK_MAX), so
+ * modules written for other cameras still start here.
+ */
+#define TASK_STACK_MAX 0x8000
+extern uint32_t _task_create(const char *name, uint32_t priority, uint32_t stack_size,
+                             void *entry, void *arg);
+
+uint32_t task_create(const char *name, uint32_t priority, uint32_t stack_size,
+                     void *entry, void *arg)
+{
+    if (stack_size > TASK_STACK_MAX)
+    {
+        DryosDebugMsg(0, 15, "task_create(%s): stack 0x%x -> 0x%x", name, stack_size, TASK_STACK_MAX);
+        stack_size = TASK_STACK_MAX;
+    }
+    return _task_create(name, priority, stack_size, entry, arg);
+}
