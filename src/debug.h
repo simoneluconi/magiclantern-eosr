@@ -129,6 +129,11 @@ msleep(100); dmstop(); call("dumpf"); }
 /* return the message from last ASSERT call */
 const char* get_assert_msg();
 
+/* Temperatures as shown by ML, in the unit chosen in Debug > Internal Temp
+ * (Celsius or Fahrenheit): the value, rounded, and its unit ("°C" / "°F") */
+int temp_display_value(int celsius);
+const char * temp_display_unit(void);
+
 /* Canon's movie heat model, as cached for the Internal Temp submenu
  * (FEATURE_SHOW_TEMP_SENSORS; PROP_HEAT_REMAIN_DISPLAY and
  * PROP_MOVIE_REMAIN_TIME in property.h). Read only. */

@@ -3228,7 +3228,8 @@ static LVINFO_UPDATE_FUNC(temp_update)
     LVINFO_BUFFER(8);
     
     int t = EFIC_CELSIUS;
-    snprintf(buffer, sizeof(buffer), "%d"SYM_DEGREE"C", t);
+    /* in the chosen unit; the warning colours stay in Celsius */
+    snprintf(buffer, sizeof(buffer), "%d%s", temp_display_value(t), temp_display_unit());
     if (t >= 60)
     {
         item->color_bg = COLOR_RED;

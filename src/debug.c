@@ -744,6 +744,23 @@ static MENU_UPDATE_FUNC(totalshoot_display)
 }
 #endif
 
+/* unit for the temperatures ML shows: 0 = Celsius, 1 = Fahrenheit */
+static CONFIG_INT("temp.unit", temp_unit, 0);
+
+int temp_display_value(int celsius)
+{
+    if (!temp_unit)
+        return celsius;
+    /* F = C * 1.8 + 32, rounded to the nearest degree */
+    int f10 = celsius * 18 + 320;
+    return (f10 + (f10 >= 0 ? 5 : -5)) / 10;
+}
+
+const char * temp_display_unit(void)
+{
+    return temp_unit ? SYM_DEGREE"F" : SYM_DEGREE"C";
+}
+
 #ifdef FEATURE_SHOW_CMOS_TEMPERATURE
 #ifdef EFIC_CELSIUS
 #define FAHRENHEIT (EFIC_CELSIUS * 9 / 5 + 32)
@@ -792,7 +809,7 @@ static MENU_UPDATE_FUNC(temp_sensor_display)
         MENU_SET_VALUE("n/a");
         return;
     }
-    MENU_SET_VALUE("%d"SYM_DEGREE"C", raw - 128);
+    MENU_SET_VALUE("%d%s", temp_display_value(raw - 128), temp_display_unit());
     MENU_SET_RINFO("%d raw", raw);
 }
 
@@ -1356,6 +1373,13 @@ static struct menu_entry debug_menus[] = {
                 .icon_type = IT_ALWAYS_ON,
                 .help = "Budget left in Canon's time-based heat model (0..65535).",
                 .help2 = "Row: Canon's table row. Always 1 while this menu is open.",
+            },
+            {
+                .name = "Unit",
+                .priv = &temp_unit,
+                .max = 1,
+                .choices = CHOICES(SYM_DEGREE"C (Celsius)", SYM_DEGREE"F (Fahrenheit)"),
+                .help = "Unit for the temperatures in this menu and the LiveView bar.",
             },
             MENU_EOL,
         },
