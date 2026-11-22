@@ -280,7 +280,29 @@ void refresh_yuv_from_rgb(void)
 void rgba_buffer_clear()
 {
     if (rgb_vram_info == NULL) return;
+#if defined(CONFIG_DIGIC_X) && !defined(CONFIG_COMPOSITOR_DEDICATED_LAYER)
+    // We draw into Canon's GUI layer (BMP_LAYER_WIDTH pitch): a linear
+    // bzero32 would erase Canon's pixels and miss some of ours. Erase only
+    // the pixels we drew, and the indexed pixel with them, so a concurrent
+    // refresh_yuv_from_rgb() can't draw it back.
+    if (bmp_vram_indexed == NULL) return;
+    uint8_t *b = bmp_vram_indexed;
+    uint32_t *rgb_row = (uint32_t *)rgb_vram_info->bitmap_data;
+    for (int y = 0; y < BMP_H_PLUS - BMP_H_MINUS; y++)
+    {
+        for (int x = 0; x < BMPPITCH; x++, b++)
+        {
+            if (indexed2rgb(*b) != 0x00000000)
+            {
+                *b = 0;
+                rgb_row[x] = 0x00000000;
+            }
+        }
+        rgb_row += BMP_LAYER_WIDTH;
+    }
+#else
     bzero32(rgb_vram_info->bitmap_data, BMP_VRAM_SIZE*4);
+#endif
 }
 
 #if defined(CONFIG_INSTALLER)
@@ -739,10 +761,12 @@ getfilesize_fail:
 
 void clrscr()
 {
-    BMP_LOCK( bmp_fill( 0x0, BMP_W_MINUS, BMP_H_MINUS, BMP_TOTAL_WIDTH, BMP_TOTAL_HEIGHT ); )
     #ifdef FEATURE_VRAM_RGBA
-    // clear RGBA buffer
-    rgba_buffer_clear();
+    // clear RGBA first: on DIGIC X it reads the indexed buffer
+    // to find the pixels we drew
+    BMP_LOCK( rgba_buffer_clear(); bmp_fill( 0x0, BMP_W_MINUS, BMP_H_MINUS, BMP_TOTAL_WIDTH, BMP_TOTAL_HEIGHT ); )
+    #else
+    BMP_LOCK( bmp_fill( 0x0, BMP_W_MINUS, BMP_H_MINUS, BMP_TOTAL_WIDTH, BMP_TOTAL_HEIGHT ); )
     #endif
 
 }
