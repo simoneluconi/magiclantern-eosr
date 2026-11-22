@@ -410,7 +410,15 @@ PROP_HANDLER(PROP_ABORT)
 PROP_HANDLER(PROP_SHUTDOWN_REASON)
 {
     DryosDebugMsg(0, 15, "SHUTDOWN REASON %d", buf[0]);
+#ifdef CONFIG_R6
+    // R6: the value delivered when the handler is registered, before
+    // ML has started, is not understood yet; don't let it stop ML.
+    // Real shutdowns still arrive later (tested on camera).
+    extern int ml_started;
+    if (buf[0] != 0 && ml_started)  ml_shutdown();
+#else
     if (buf[0] != 0)  ml_shutdown();
+#endif
 }
 #endif
 
