@@ -867,11 +867,29 @@ void smooth_iso_step()
 #endif
 
 #ifdef FEATURE_OVERRIDE_MOVIE_30_MIN_LIMIT
+// In seconds. 30 min = Canon's own limit (29:59, 7:29 at high frame rate),
+// nothing patched. MOV_TIME_LIMIT_OFF = no limit.
 static CONFIG_INT("movie.time_limit", mov_time_limit, 30 * 60);
+#define MOV_TIME_LIMIT_OFF 0
+
+// Value patched in for MOV_TIME_LIMIT_OFF. On R6 1.9.0 (not checked on
+// other models) Canon stops the clip when the elapsed time in ms, checked
+// on whole seconds, equals the limit, and caps the remaining-time display
+// at limit / 1000 s. This value is not a multiple of 100 ms, so it never
+// matches; it is below 2^31 and reads as 99:59:59 when divided by 1000.
+#define MOV_TIME_LIMIT_OFF_MS 359999999
 
 static MENU_UPDATE_FUNC(print_mov_time_limit)
 {
-    if (mov_time_limit >= 60)
+    if (mov_time_limit == MOV_TIME_LIMIT_OFF)
+    {
+        MENU_SET_VALUE("OFF (no limit)");
+    }
+    else if (mov_time_limit == 30 * 60)
+    {
+        MENU_SET_VALUE("29:59 (Canon)");
+    }
+    else if (mov_time_limit >= 60)
     {
         MENU_SET_VALUE("%d min", mov_time_limit / 60);
     }
@@ -880,20 +898,23 @@ static MENU_UPDATE_FUNC(print_mov_time_limit)
         MENU_SET_VALUE("%d sec", mov_time_limit);
     }
 
+    // highlighted when something is patched
+    MENU_SET_ENABLED(mov_time_limit != 30 * 60);
+
     if (RECORDING)
     {
         MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Can't change the time limit while recording.");
     }
     else
     {
-        MENU_SET_WARNING(MENU_WARN_ADVICE, entry->help2);
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "Too long recording makes empty files on ExFAT, ok on FAT32");
     }
 }
 
 static void change_mov_time_limit(void* priv, int delta)
 {
     // Time is in held in seconds.  Defaults to 30m.
-    // Allow upwards changes 10m at a time, max 90m (it is not determined what true max is).
+    // Allow upwards changes 15m / 30m at a time up to 180m, then OFF (no limit).
     // Allow downwards changes 5m at a time until 5m, then 1m, then 10s,
     // 10s minimum.
 
@@ -904,7 +925,7 @@ static void change_mov_time_limit(void* priv, int delta)
 
     // Lets be extra sure to avoid negatives since we're MMU patching ROM code
     // with this value.
-    if (mov_time_limit <= 0)
+    if (mov_time_limit < 0)
     {
         mov_time_limit = 10;
         return;
@@ -912,7 +933,9 @@ static void change_mov_time_limit(void* priv, int delta)
 
     if (delta < 0)
     {
-        if (mov_time_limit <= 10)
+        if (mov_time_limit == MOV_TIME_LIMIT_OFF)
+            mov_time_limit = 180 * 60;
+        else if (mov_time_limit <= 10)
             mov_time_limit = 10;
         else if (mov_time_limit <= 60)
             mov_time_limit -= 10;
@@ -927,8 +950,8 @@ static void change_mov_time_limit(void* priv, int delta)
     }
     else if (delta > 0)
     {
-        if (mov_time_limit >= 180 * 60)
-            mov_time_limit = 180 * 60;
+        if (mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit >= 180 * 60)
+            mov_time_limit = MOV_TIME_LIMIT_OFF;
         else if (mov_time_limit >= 90 * 60)
             mov_time_limit += 30 * 60;
         else if (mov_time_limit >= 30 * 60)
@@ -946,18 +969,20 @@ static void change_mov_time_limit(void* priv, int delta)
     // We have our target max time. If user requests 30 min,
     // we revert to stock, which technically is 29m 59s.
     // Otherwise, we patch in the new limit.
+    uint32_t limit_ms = mov_time_limit == MOV_TIME_LIMIT_OFF ? MOV_TIME_LIMIT_OFF_MS
+                                                             : mov_time_limit * 1000;
     struct patch patches[2] = {
         {
             .addr = (uint8_t *)MVR_TIME_LIMIT_NORMAL_FPS,
             .old_value = 0x1b7358, // 29m59s
-            .new_value = mov_time_limit * 1000,
+            .new_value = limit_ms,
             .size = 4,
             .description = "MOV time limit"
         },
         {
             .addr = (uint8_t *)MVR_TIME_LIMIT_HIGH_FPS,
             .old_value = 0x6d9e8, // 7m29s
-            .new_value = mov_time_limit * 1000,
+            .new_value = limit_ms,
             .size = 4,
             .description = "MOV time limit, high FPS"
         }
@@ -1067,8 +1092,8 @@ static struct menu_entry mov_menus[] = {
         .select = change_mov_time_limit,
         .min = 1,
         .max = 180,
-        .help = "Change 29:59 movie recording limit",
-        .help2 = "Too long recording makes empty files on ExFAT, ok on FAT32",
+        .help = "Change or remove the 29:59 limit (7:29 at high frame rate).",
+        .help2 = "Canon's overheat stop and the card speed still apply.",
     },
     #endif
     #ifdef FEATURE_GRADUAL_EXPOSURE
