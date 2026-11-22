@@ -879,7 +879,15 @@ static MENU_UPDATE_FUNC(print_mov_time_limit)
     {
         MENU_SET_VALUE("%d sec", mov_time_limit);
     }
-    MENU_SET_WARNING(MENU_WARN_ADVICE, entry->help2);
+
+    if (RECORDING)
+    {
+        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Can't change the time limit while recording.");
+    }
+    else
+    {
+        MENU_SET_WARNING(MENU_WARN_ADVICE, entry->help2);
+    }
 }
 
 static void change_mov_time_limit(void* priv, int delta)
@@ -888,6 +896,11 @@ static void change_mov_time_limit(void* priv, int delta)
     // Allow upwards changes 10m at a time, max 90m (it is not determined what true max is).
     // Allow downwards changes 5m at a time until 5m, then 1m, then 10s,
     // 10s minimum.
+
+    // Don't remap ROM under a running recording; delta == 0 is the
+    // restore at startup.
+    if (delta && RECORDING)
+        return;
 
     // Lets be extra sure to avoid negatives since we're MMU patching ROM code
     // with this value.
@@ -956,8 +969,15 @@ static void change_mov_time_limit(void* priv, int delta)
         return;
     }
 
-    apply_patches(patches, 2);
-    return;
+    // apply_patches() checks the old values, applies both or neither,
+    // and logs the reason to the console on failure. Fall back to
+    // Canon's limit so the menu shows what is really in effect.
+    int err = apply_patches(patches, 2);
+    if (err)
+    {
+        mov_time_limit = 30 * 60;
+        NotifyBox(5000, "Time limit patch failed (0x%x), Canon limit kept", err);
+    }
 }
 #endif // FEATURE_OVERRIDE_MOVIE_30_MIN_LIMIT
 
@@ -1049,7 +1069,7 @@ static struct menu_entry mov_menus[] = {
         .max = 180,
         .help = "Change 29:59 movie recording limit",
         .help2 = "Too long recording makes empty files on ExFAT, ok on FAT32",
-    }
+    },
     #endif
     #ifdef FEATURE_GRADUAL_EXPOSURE
     {
