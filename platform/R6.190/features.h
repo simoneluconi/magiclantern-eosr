@@ -48,6 +48,7 @@
 // Only what the R6 lacks; zebras, focus peaking and the histogram are
 // Canon's own on R6.
 #define FEATURE_GLOBAL_DRAW
+#define FEATURE_SPOTMETER
 
 #undef CONFIG_CRASH_LOG
 #undef CONFIG_PROP_REQUEST_CHANGE
