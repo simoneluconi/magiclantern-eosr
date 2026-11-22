@@ -35,6 +35,19 @@
  * features or modules that R6 does not enable). */
 #define CONFIG_LIVEVIEW
 
+/** RECORDING / RECORDING_H264 follow PROP_SHOOTING_TYPE == 4, as on 50D
+ * (src/propvalues.c). PROP_MVR_REC_START stays on prop_handler_deny.
+ * DlgLiveView sets it, as GUIGate_NotifyShootType (0xE04DE670) maps its
+ * GUI type 2 to a 2-byte request {4, 0}:
+ * - handleMovieRecordSecCountEvent "StartEncode" (0xE0BD260A), when the
+ *   GUI recording state (GUI_SetRecordingState 0xE079B0B0) goes 2 -> 3
+ * - the error / posture callback that also sets state 3 (0xE0BD2BA8)
+ * The stop callback (0xE0BD274E) sends GUI type 1, i.e. 3 = LV.
+ * So RECORDING is 0 during Canon's first second (states 1 and 2) and
+ * while the file is closed (state 5). Canon's heat model checks the same
+ * value (0xE04E8440). */
+#define CONFIG_RECORDING_FROM_SHOOTING_TYPE
+
 /** ML's LV image (get_yuv422_vram) is Canon's FaceYuv buffer, see
  * faceyuv.c: FACEYUV_WIDTH x FACEYUV_HEIGHT UYVY with signed chroma,
  * shown on ML's whole 720x480 area (src/vram.c, src/imgconv.h). */

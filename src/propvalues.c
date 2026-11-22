@@ -281,7 +281,9 @@ PROP_HANDLER(PROP_HDMI_CHANGE_CODE)
     hdmi_vars_update();
 }
 
-#ifdef CONFIG_50D
+#if defined(CONFIG_50D) || defined(CONFIG_RECORDING_FROM_SHOOTING_TYPE)
+/* H.264 recording state from PROP_SHOOTING_TYPE (4 = movie recording),
+ * without PROP_MVR_REC_START. There is no "starting" state: 0 or 2. */
 int __recording = 0;
 int shooting_type = 0;
 PROP_HANDLER(PROP_SHOOTING_TYPE)
@@ -289,15 +291,17 @@ PROP_HANDLER(PROP_SHOOTING_TYPE)
     shooting_type = buf[0];
     __recording = (shooting_type == 4 ? 2 : 0);
 }
+#else
+volatile PROP_INT(PROP_MVR_REC_START, __recording);
+volatile PROP_INT(PROP_SHOOTING_TYPE, shooting_type);
+#endif
 
+#ifdef CONFIG_50D
 PROP_HANDLER(PROP_MOVIE_SIZE_50D)
 {
     video_mode_resolution = buf[0];
     video_mode_fps = 30;
 }
-#else
-volatile PROP_INT(PROP_MVR_REC_START, __recording);
-volatile PROP_INT(PROP_SHOOTING_TYPE, shooting_type);
 #endif
 int __recording_custom = 0;
 

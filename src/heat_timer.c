@@ -60,8 +60,9 @@ static struct semaphore *heat_timer_sem = NULL;
 static uint32_t heat_patch_buf[HEAT_PATCH_SIZE / 4];
 
 // Canon's model uses the recording seconds while PROP_SHOOTING_TYPE is 4
-// (0xE04E8440 on R6). RECORDING alone is not enough there: R6 does not
-// read PROP_MVR_REC_START (prop_handler_deny).
+// (0xE04E8440 on R6). On R6, RECORDING comes from the same value
+// (CONFIG_RECORDING_FROM_SHOOTING_TYPE); check both anyway, in case
+// RECORDING comes from PROP_MVR_REC_START.
 static int heat_timer_recording(void)
 {
     return RECORDING || shooting_type == 4;
