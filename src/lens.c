@@ -866,6 +866,18 @@ lens_focus(
     return lv_focus_error ? 0 : 1;
 }
 
+/* burst_count (propvalues.c) stays 0 if Canon never sends PROP_BURST_COUNT.
+ * lens_wait_readytotakepic() would then run into its whole timeout (64 s,
+ * several times per picture), so it only waits for burst_count once Canon
+ * has reported it. Canon sends a property's value when ML registers it, so
+ * on cameras that have it this changes nothing. */
+static volatile int burst_count_seen = 0;
+
+PROP_HANDLER( PROP_BURST_COUNT )
+{
+    burst_count_seen = 1;
+}
+
 // wait is max wait in seconds
 void lens_wait_readytotakepic(int wait)
 {
@@ -887,7 +899,7 @@ void lens_wait_readytotakepic(int wait)
             msleep(50);
             continue;
         }
-        if (job_state_ready_to_take_pic() && burst_count > 0 && ((icu_uilock & 0xFF) == 0))
+        if (job_state_ready_to_take_pic() && (burst_count > 0 || !burst_count_seen) && ((icu_uilock & 0xFF) == 0))
         {
             break;
         }
