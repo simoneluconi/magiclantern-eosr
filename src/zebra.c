@@ -526,7 +526,10 @@ static inline void waveform_add_pixel(int x, int Y)
 }
 #endif
 
-#if defined(FEATURE_HISTOGRAM)
+/* one pass over the LV image for the histogram, the waveform and the
+ * vectorscope; the histogram or the waveform may be compiled in without
+ * the other, and without the vectorscope */
+#if defined(FEATURE_HISTOGRAM) || defined(FEATURE_WAVEFORM)
 static void
 hist_build()
 {
@@ -536,7 +539,9 @@ hist_build()
 
     int x,y;
 
+    #ifdef FEATURE_HISTOGRAM
     memset(&histogram, 0, sizeof(histogram));
+    #endif
 
     #ifdef FEATURE_WAVEFORM
     if (waveform_draw)
@@ -552,6 +557,8 @@ hist_build()
     {
         vectorscope_start();
     }
+    #else
+    const int vectorscope_draw = 0;
     #endif
     
     #ifdef FEATURE_RAW_HISTOGRAM
@@ -561,13 +568,18 @@ hist_build()
     }
     #endif
     
+    #ifdef FEATURE_HISTOGRAM
     histogram.is_rgb =
         histogram.is_raw ||    /* RAW histogram is always RGB-based */
         ((hist_type == 1 ||    /* Use YUV RGB histogram if selected */
           hist_type == 2) &&   /* Fall back to YUV RGB if we can't use the RAW RGB histogram */
          !EXT_MONITOR_RCA);    /* However, we cannot use YUV RGB histogram on RCA monitors, because they use YUV411 instead of YUV422 */
+    const int hist_yuv = hist_draw && !histogram.is_raw;
+    #else
+    const int hist_yuv = 0;
+    #endif
     
-    if (!waveform_draw && !vectorscope_draw && (!hist_draw || histogram.is_raw))
+    if (!waveform_draw && !vectorscope_draw && !hist_yuv)
     {
         /* optimization: no YUV-based histogram/waveform/scope enabled
          * => no need to scan the entire image */
@@ -588,10 +600,12 @@ hist_build()
 
             int Y = UYVY_GET_AVG_Y(pixel);
             
-            if (hist_draw && !histogram.is_raw)
+            #ifdef FEATURE_HISTOGRAM
+            if (hist_yuv)
             {
                 hist_add_pixel(pixel, Y);
             }
+            #endif
             
             #ifdef FEATURE_WAVEFORM
             if (waveform_draw) 
@@ -611,7 +625,7 @@ hist_build()
         }
     }
 }
-#endif // FEATURE_HISTOGRAM
+#endif // FEATURE_HISTOGRAM || FEATURE_WAVEFORM
 #endif // FEATURE_HISTOGRAM || FEATURE_WAVEFORM || FEATURE_VECTORSCOPE
 
 #ifdef FEATURE_RAW_ZEBRAS
@@ -968,8 +982,10 @@ waveform_draw_image(
     uint8_t * const bvram = bmp_vram();
     if (!bvram) return;
     unsigned pitch = BMPPITCH;
+    #ifdef FEATURE_HISTOGRAM
     if( histogram.max == 0 )
         histogram.max = 1;
+    #endif
 
     int i, y;
 
@@ -3725,7 +3741,9 @@ void draw_histogram_and_waveform(int allow_play)
 
 #if defined(FEATURE_HISTOGRAM) || defined(FEATURE_WAVEFORM) || defined(FEATURE_VECTORSCOPE)
     if (0
+    #if defined(FEATURE_HISTOGRAM)
         || hist_draw
+    #endif
         || waveform_draw
     #if defined(FEATURE_VECTORSCOPE)
         || vectorscope_should_draw()
