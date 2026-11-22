@@ -59,6 +59,7 @@ void draw_false_downsampled( void )
     if (!bvram_mirror) return;
 
     uint8_t * const lvram = get_yuv422_vram()->vram;
+    if (!lvram) return;
     uint8_t* fc = false_colour[falsecolor_palette];
 
     int off = get_y_skip_offset_for_overlays();
