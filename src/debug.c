@@ -847,6 +847,32 @@ static MENU_UPDATE_FUNC(heat_remain_display)
     }
     MENU_SET_RINFO("%d s", remain);
 }
+
+/* see PROP_MOVIE_REMAIN_TIME in property.h; -1 until the first event */
+static volatile int heat_budget = -1;
+static volatile int heat_mode_row = -1;
+
+PROP_HANDLER(PROP_MOVIE_REMAIN_TIME)
+{
+    if (len >= 8)
+    {
+        heat_budget = buf[0];
+        heat_mode_row = (int16_t) (buf[1] & 0xFFFF);
+    }
+}
+
+static MENU_UPDATE_FUNC(heat_budget_display)
+{
+    int budget = heat_budget;
+
+    if (budget < 0 || budget > 0xFFFF)
+    {
+        MENU_SET_VALUE("n/a");
+        return;
+    }
+    MENU_SET_VALUE("%d%%", budget * 100 / 0xFFFF);
+    MENU_SET_RINFO("row %d", heat_mode_row);
+}
 #endif
 #endif
 
@@ -1301,6 +1327,13 @@ static struct menu_entry debug_menus[] = {
                 .icon_type = IT_ALWAYS_ON,
                 .help = "Canon's remaining movie time before overheat stop.",
                 .help2 = "Rounded down to 5 min (1 min below 5 min) by Canon.",
+            },
+            {
+                .name = "Movie heat budget",
+                .update = heat_budget_display,
+                .icon_type = IT_ALWAYS_ON,
+                .help = "Budget left in Canon's time-based heat model.",
+                .help2 = "Row: Canon's table entry for the current mode.",
             },
             MENU_EOL,
         },

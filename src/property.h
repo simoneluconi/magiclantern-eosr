@@ -225,6 +225,11 @@
 // this mode. 0xFFFF: initial value from TempSvc, not computed yet.
 // Word 1 is not set by 0xE04E8B7E (stack leftover), ignore it.
 #define PROP_HEAT_REMAIN_DISPLAY 0x800000D9
+
+// Saved state of the heat model (written by 0xE04E95A4, read at boot by
+// 0xE04E86B8), 8 bytes. Word 0: heat budget, 0xFFFF = full, 0 = empty.
+// Halfword 2: row of the mode table at 0xE0D9CEA4. Halfword 3: unknown.
+#define PROP_MOVIE_REMAIN_TIME  0x02050043
 #endif
 
 #ifdef CONFIG_5DC
