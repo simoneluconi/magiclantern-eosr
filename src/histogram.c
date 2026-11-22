@@ -199,7 +199,8 @@ static int hist_dot_radius(int over, int hist_total_px)
     if (p > 1) return 10;
 
     // for smaller overexposure percentages, use dot radius to suggest the amount
-    unsigned p1000 = 100 * 1000 * over / hist_total_px;
+    // (64-bit product: 100000 * over overflows int above 21474 pixels)
+    unsigned p1000 = 100000ull * over / hist_total_px;
     int plog = p1000 ? (int)log2f(p1000) : 0;
     return MIN(plog, 10);
 }
