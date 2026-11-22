@@ -18,6 +18,17 @@
  * (get_malloc_info 0xE037C234 reads +4, +8, +0x18, +0x1C, +0x20) */
 #define CONFIG_MALLOC_STRUCT_V2
 
+/** PTP (only used when building with CONFIG_PTP=y):
+ * send_data() is asynchronous, (handle, buf, size, total, callback, cb_priv, 0).
+ * Canon's GetDeviceInfo (0xE02B4780) passes callback 0xE02B4761, which stores
+ * the status at priv[1] and gives the semaphore at priv[0], then waits on it. */
+#define CONFIG_PTP_ASYNC_SEND
+
+/** recv_data() takes a whole data phase in one call,
+ * recv_data(handle, buf, get_data_size(), 0, 0) (SetDevicePropValueEx
+ * 0xE02B7B54, SendObject 0xE02B6170). Split reads crashed the camera (ERR70). */
+#define CONFIG_PTP_RECV_ONCE
+
 #define CONFIG_TASK_STRUCT_V2_SMP
 #define CONFIG_TASK_ATTR_STRUCT_V5
 
