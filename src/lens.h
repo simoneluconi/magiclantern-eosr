@@ -341,6 +341,16 @@ extern const uint8_t codes_aperture[APERTURE_ARRAY_LEN];
 #define APEX1000_SV2RAW(apex) -APEX_SV(RSCALE(-(apex), 8, 1000))    /* pathological case at ISO 3.125 */
 #define APEX1000_EC2RAW(apex) RSCALE(apex, 8, 1000)
 
+/* "Code768": signed APEX * 768, 256 per 1/3 EV. On cams with
+ * CONFIG_EXPO_CODE768, PROP_APERTURE and PROP_APERTURE_AUTO carry it
+ * as 2 bytes instead of ML's raw (1/8 EV) codes; one raw step is 96. */
+static inline int code768_to_raw_steps(int code)
+{
+    /* nearest 1/8 EV step (1/3 and 1/2 stops land on ML's usual codes) */
+    return code >= 0 ? (code + 48) / 96 : -((48 - code) / 96);
+}
+#define CODE768_TO_RAW_AV(code) (8 + code768_to_raw_steps(code))   /* 0 = f/1.0, see APEX_AV */
+
 // Conversions
 int raw2shutter_ms(int raw_shutter);
 int shutter_ms_to_raw(int shutter_ms);

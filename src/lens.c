@@ -1520,6 +1520,23 @@ static void lensinfo_set_aperture(int raw)
     update_stuff();
 }
 
+/* Raw aperture from PROP_APERTURE / PROP_APERTURE_AUTO.
+ * Returns 0 if this property value is to be ignored. */
+static int aperture_prop_to_raw(const uint32_t * buf, int len, uint32_t * raw)
+{
+#ifdef CONFIG_EXPO_CODE768
+    /* 2 bytes, Code768 (see lens.h); only read those 2. Other lengths and
+     * values outside ML's raw range (e.g. 0xDF00, "no value") are ignored. */
+    if (len != 2) return 0;
+    int r = CODE768_TO_RAW_AV(*(const int16_t *) buf);
+    if (r <= 0 || r > 0xFF) return 0;
+    *raw = r;
+#else
+    *raw = buf[0];
+#endif
+    return 1;
+}
+
 extern int bv_auto;
 
 #if defined(CONFIG_NO_MANUAL_EXPOSURE_MOVIE) && !defined(CONFIG_NO_DEDICATED_MOVIE_MODE)
@@ -1630,19 +1647,23 @@ PROP_HANDLER( PROP_SHUTTER )
 
 PROP_HANDLER( PROP_APERTURE )
 {
-    //~ NotifyBox(2000, "%x %x %x %x ", buf[0], CONTROL_BV, lens_info.raw_aperture_min, lens_info.raw_aperture_max);
+    uint32_t raw;
+    if (!aperture_prop_to_raw(buf, len, &raw))
+        return;
+
+    //~ NotifyBox(2000, "%x %x %x %x ", raw, CONTROL_BV, lens_info.raw_aperture_min, lens_info.raw_aperture_max);
     if (!CONTROL_BV)
     {
-        lensinfo_set_aperture(buf[0]);
+        lensinfo_set_aperture(raw);
     }
     #ifdef FEATURE_EXPO_OVERRIDE
-    else if (buf[0] && !gui_menu_shown()
+    else if (raw && !gui_menu_shown()
         #ifdef CONFIG_MOVIE_EXPO_OVERRIDE_DISABLE_SYNC_WITH_PROPS
         && !is_movie_mode()
         #endif
     )
     {
-        bv_set_rawaperture(COERCE(buf[0], lens_info.raw_aperture_min, lens_info.raw_aperture_max));
+        bv_set_rawaperture(COERCE(raw, lens_info.raw_aperture_min, lens_info.raw_aperture_max));
     }
     bv_auto_update();
     #endif
@@ -1654,18 +1675,22 @@ PROP_HANDLER( PROP_APERTURE_AUTO )
     /* this gets updated in Tv mode (where PROP_APERTURE is not updated); same for P, Auto and so on */
     /* it becomes 0 when camera is no longer metering */
 
+    uint32_t raw;
+    if (!aperture_prop_to_raw(buf, len, &raw))
+        return;
+
     if (shooting_mode == SHOOTMODE_M || shooting_mode == SHOOTMODE_AV)
     {
         /* in these modes, aperture is not automatic */
         /* however, this property sometimes becomes 0 in these modes as well, but this is not desired */
-        if (buf[0] == 0)
+        if (raw == 0)
             return;
     }
 
     if (!CONTROL_BV)
     {
         /* expo override turned off? */
-        lensinfo_set_aperture(buf[0]);
+        lensinfo_set_aperture(raw);
     }
 
     lens_display_set_dirty();
