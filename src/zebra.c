@@ -1043,6 +1043,10 @@ waveform_draw_image(
         }
         bmp_draw_rect(60, x_origin-1, y_origin-1, WAVEFORM_WIDTH*WAVEFORM_FACTOR+1, height+1);
     }
+#ifdef FEATURE_VRAM_RGBA
+    /* drawn into ML's indexed buffer: have redraw_task show it */
+    ml_refresh_display_needed = 1;
+#endif
 }
 #endif // FEATURE_WAVEFORM
 

@@ -98,6 +98,10 @@ void draw_false_downsampled( void )
             #undef MN
         }
     }
+#ifdef FEATURE_VRAM_RGBA
+    /* drawn into ML's indexed buffer: have redraw_task show it */
+    ml_refresh_display_needed = 1;
+#endif
 }
 
 char* falsecolor_palette_name()
