@@ -13,6 +13,10 @@
 #define FEATURE_SHOW_CMOS_TEMPERATURE
 // Submenu with all of Canon's temperature sensors (PROP_TEMP_* ids)
 #define FEATURE_SHOW_TEMP_SENSORS
+// Movie > Heat timer: scales the seconds of Canon's time-based heat
+// table (HEAT_TABLE_* in consts.h) with patch_mmu. Sensor thresholds
+// are not touched.
+#define FEATURE_MOVIE_HEAT_TIMER
 
 // CONFIG_TSKMON is on by default
 #define FEATURE_SHOW_TASKS
