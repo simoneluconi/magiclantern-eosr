@@ -156,6 +156,14 @@
 #define PROP_SHUTTER_AUTO       0x8000002c // computed in Av mode
 #define PROP_APERTURE_AUTO      0x8000002d // computed in Tv mode
 
+#ifdef CONFIG_R6_190
+/* Canon's metering result, 148 bytes, updated continuously in LiveView.
+ * Signed Code768 (see lens.h) Bv, Sv, Tv, Av at +0, +2, +4, +6 (seen on
+ * camera in P, Tv and Av). This camera never sends PROP_SHUTTER_AUTO or
+ * PROP_APERTURE_AUTO. */
+#define PROP_AE_VALUES_CODE768  0x8002003A
+#endif
+
 #define PROP_APERTURE3          0x80000036
 
 #define PROP_SHUTTER_RELEASE    0x8003000A

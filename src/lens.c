@@ -1725,9 +1725,36 @@ PROP_HANDLER( PROP_SHUTTER_AUTO )
         if (ABS(raw - lens_info.raw_shutter) > 3)
             lensinfo_set_shutter(raw);
     }
-    
+
     lens_display_set_dirty();
 }
+
+#ifdef PROP_AE_VALUES_CODE768
+PROP_HANDLER( PROP_AE_VALUES_CODE768 )
+{
+    /* On cams without PROP_SHUTTER_AUTO / PROP_APERTURE_AUTO: take the
+     * automatic shutter and aperture from Canon's metering result. Only use
+     * the values that are automatic in the current mode, like the handlers
+     * above (in M the layout looked different on the R6). */
+    if (len < 8)
+        return;
+
+    if (CONTROL_BV || shooting_mode == SHOOTMODE_M || shooting_mode == SHOOTMODE_BULB)
+        return;
+
+    const int16_t * v = (const int16_t *) buf;
+    int tv = CODE768_TO_RAW_TV(v[2]);
+    int av = CODE768_TO_RAW_AV(v[3]);
+
+    if (shooting_mode != SHOOTMODE_TV && tv > 0 && tv <= 0xFF && tv != (int) lens_info.raw_shutter)
+        lensinfo_set_shutter(tv);
+
+    if (shooting_mode != SHOOTMODE_AV && av > 0 && av <= 0xFF && av != (int) lens_info.raw_aperture)
+        lensinfo_set_aperture(av);
+
+    lens_display_set_dirty();
+}
+#endif
 
 PROP_HANDLER( PROP_AE )
 {
