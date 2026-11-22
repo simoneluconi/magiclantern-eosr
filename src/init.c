@@ -480,6 +480,17 @@ static void my_big_init_task()
     menu_init();
     debug_init();
     call_init_funcs(); // among other things, this initialises modules
+
+#ifdef FEATURE_VRAM_RGBA
+    if (!bmp_vram_indexed_ready())
+    {
+        /* bmp_init() could not allocate the buffer: menu, console and
+         * notify boxes would draw into low DryOS RAM. Don't start ML. */
+        DryosDebugMsg(0, 15, "ML: no bmp buffer, not starting");
+        return;
+    }
+#endif
+
     msleep(200); // leave some time for property handlers to run
 
 #ifdef CONFIG_XF605

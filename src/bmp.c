@@ -109,6 +109,14 @@ void bmp_draw_to_idle(int value) { bmp_idle_flag = value; }
 #ifdef FEATURE_VRAM_RGBA
 struct MARV *rgb_vram_info = NULL;
 static uint8_t *bmp_vram_indexed = NULL;
+
+// bmp_vram() doesn't check this: before bmp_init() it would return
+// NULL + BMP_HDMI_OFFSET, and drawing would overwrite low DryOS RAM.
+int bmp_vram_indexed_ready(void)
+{
+    return bmp_vram_indexed != NULL;
+}
+
 // SJE what is an appropriate priority for this task?
 TASK_CREATE( "redraw_task", refresh_yuv_from_rgb_task, 0, 0x1e, 0x1000 );
 #endif
