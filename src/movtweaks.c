@@ -889,6 +889,11 @@ static MENU_UPDATE_FUNC(print_mov_time_limit)
     {
         MENU_SET_VALUE("29:59 (Canon)");
     }
+    else if (mov_time_limit % (60 * 60) == 0)
+    {
+        // whole hours are one second less (see change_mov_time_limit)
+        MENU_SET_VALUE("%d:59", mov_time_limit / 60 - 1);
+    }
     else if (mov_time_limit >= 60)
     {
         MENU_SET_VALUE("%d min", mov_time_limit / 60);
@@ -984,6 +989,11 @@ static void change_mov_time_limit(void* priv, int delta)
     // Otherwise, we patch in the new limit.
     uint32_t limit_ms = mov_time_limit == MOV_TIME_LIMIT_OFF ? MOV_TIME_LIMIT_OFF_MS
                                                              : mov_time_limit * 1000;
+    // Canon shows the limit as the remaining time in minutes:seconds, and
+    // on R6 a whole hour (60:00) showed as 0:00 (recording itself was fine).
+    // One second less, as Canon's own 29:59: 60 min -> 59:59.
+    if (mov_time_limit != MOV_TIME_LIMIT_OFF && mov_time_limit % (60 * 60) == 0)
+        limit_ms -= 1000;
     uint32_t hfr_limit_ms = limit_ms;
 #ifdef MVR_TIME_LIMIT_MAX_HFR_SEC
     // high frame rate has more frames per second: its own maximum (consts.h)
