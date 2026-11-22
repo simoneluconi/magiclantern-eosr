@@ -888,8 +888,11 @@ static MENU_UPDATE_FUNC(heat_budget_display)
         return;
     }
     // raw value too: the drain is a few units per second, the percent
-    // needs minutes to move
-    MENU_SET_VALUE("%d%% (%d)", percent, budget);
+    // needs minutes to move.
+    // No "%%" before another argument: on R6, Canon's vsnprintf printed
+    // "95% (2191396)" for "%d%% (%d)", the same number at every budget,
+    // as if "%%" used up an argument.
+    MENU_SET_VALUE("%d%s (%d)", percent, "%", budget);
     MENU_SET_RINFO("row %d", heat_mode_row);
 }
 #endif
