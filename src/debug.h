@@ -129,4 +129,13 @@ msleep(100); dmstop(); call("dumpf"); }
 /* return the message from last ASSERT call */
 const char* get_assert_msg();
 
+/* Canon's movie heat model, as cached for the Internal Temp submenu
+ * (FEATURE_SHOW_TEMP_SENSORS; PROP_HEAT_REMAIN_DISPLAY and
+ * PROP_MOVIE_REMAIN_TIME in property.h). Read only. */
+/* remaining movie time in seconds, rounded by Canon; -1 if not known
+ * yet; HEAT_REMAIN_NO_LIMIT if the current mode has no limit */
+int get_heat_remain_seconds(void);
+/* heat budget left, 0..100 percent; -1 if not known yet */
+int get_heat_budget_percent(void);
+
 #endif

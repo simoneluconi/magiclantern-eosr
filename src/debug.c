@@ -829,15 +829,21 @@ PROP_HANDLER(PROP_HEAT_REMAIN_DISPLAY)
     }
 }
 
-static MENU_UPDATE_FUNC(heat_remain_display)
+int get_heat_remain_seconds(void)
 {
     int remain = heat_remain;
+    return remain == 0xFFFF ? -1 : remain;
+}
 
-    if (remain == 0xFFFF)
+static MENU_UPDATE_FUNC(heat_remain_display)
+{
+    int remain = get_heat_remain_seconds();
+
+    if (remain < 0)
     {
         MENU_SET_VALUE("n/a");
     }
-    else if (remain == 65400)
+    else if (remain == HEAT_REMAIN_NO_LIMIT)
     {
         MENU_SET_VALUE("no limit");
     }
@@ -845,7 +851,7 @@ static MENU_UPDATE_FUNC(heat_remain_display)
     {
         MENU_SET_VALUE("%d min", remain / 60);
     }
-    MENU_SET_RINFO("%d s", remain);
+    MENU_SET_RINFO("%d s", heat_remain);
 }
 
 /* see PROP_MOVIE_REMAIN_TIME in property.h; -1 until the first event */
@@ -861,18 +867,29 @@ PROP_HANDLER(PROP_MOVIE_REMAIN_TIME)
     }
 }
 
+int get_heat_budget_percent(void)
+{
+    int budget = heat_budget;
+    if (budget < 0 || budget > 0xFFFF)
+    {
+        return -1;
+    }
+    return budget * 100 / 0xFFFF;
+}
+
 static MENU_UPDATE_FUNC(heat_budget_display)
 {
     int budget = heat_budget;
+    int percent = get_heat_budget_percent();
 
-    if (budget < 0 || budget > 0xFFFF)
+    if (percent < 0)
     {
         MENU_SET_VALUE("n/a");
         return;
     }
     // raw value too: the drain is a few units per second, the percent
     // needs minutes to move
-    MENU_SET_VALUE("%d%% (%d)", budget * 100 / 0xFFFF, budget);
+    MENU_SET_VALUE("%d%% (%d)", percent, budget);
     MENU_SET_RINFO("row %d", heat_mode_row);
 }
 #endif

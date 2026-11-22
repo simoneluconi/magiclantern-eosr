@@ -225,6 +225,7 @@
 // this mode. 0xFFFF: initial value from TempSvc, not computed yet.
 // Word 1 is not set by 0xE04E8B7E (stack leftover), ignore it.
 #define PROP_HEAT_REMAIN_DISPLAY 0x800000D9
+#define HEAT_REMAIN_NO_LIMIT     65400
 
 // Saved state of the heat model (written by 0xE04E95A4, read at boot by
 // 0xE04E86B8), 8 bytes. Word 0: heat budget, 0xFFFF = full, 0 = empty.
