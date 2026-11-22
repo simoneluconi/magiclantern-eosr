@@ -21,6 +21,20 @@
  * (get_malloc_info 0xE037C234 reads +4, +8, +0x18, +0x1C, +0x20) */
 #define CONFIG_MALLOC_STRUCT_V2
 
+/** ML's lv flag follows PROP_LV_ACTION (src/propvalues.c, lv = !value).
+ * On R6 0x80050022 is 0 while LV runs, 1 when it is stopped:
+ * - DispOperator's property handler compares 0x80050022 at 0xE0750DCA
+ *   ("PROP_LV_ACTION = %d", 0xE0751124)
+ * - GuiMainEventHandler handle_START_LV_XX calls GUI_SetLvAction(0)
+ *   (0xE07AA730) at 0xE0BD3830
+ * - GmtFactory lv_start requests the property with value 0, length 4
+ *   (0xE011DC16)
+ * Per andrewpoison's camera notes, Canon's MENU (also under the ML menu,
+ * GUIMODE_ML_MENU) stops LV, so lv is 0 while a menu is open.
+ * force_liveview() has no caller in this build (all callers are behind
+ * features or modules that R6 does not enable). */
+#define CONFIG_LIVEVIEW
+
 /** PTP (only used when building with CONFIG_PTP=y):
  * send_data() is asynchronous, (handle, buf, size, total, callback, cb_priv, 0).
  * Canon's GetDeviceInfo (0xE02B4780) passes callback 0xE02B4761, which stores

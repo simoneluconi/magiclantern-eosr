@@ -61,10 +61,11 @@
  */
 #define GUIMODE_PLAY 0x2002
 #define GUIMODE_MENU 0x2003
-// lv is always 0 on R6 for now (no CONFIG_LIVEVIEW), so this is 0x2003. 0xC048
-// exists on R6 (movw + SetGUIRequestMode at 0xE07543B4, compared in the
-// PRESS_UNAVI handler 0xE0790296); its meaning in LV is not verified.
-#define GUIMODE_ML_MENU (lv ? 0xC048 : GUIMODE_MENU)
+// The ML menu opens over Canon's MENU, also from LV, as on RP.160.
+// The R5 value for LV, 0xC048, is Canon's Q screen on R6 (name table
+// 0xE1C585BC, low byte 0x48 = START_UNAVI_MODE; movw + SetGUIRequestMode
+// at 0xE07543B4, compared in the PRESS_UNAVI handler 0xE0790296).
+#define GUIMODE_ML_MENU GUIMODE_MENU
 
 #define CANON_SHUTTER_RATING 300000 // Canon's official rating for R6
 
