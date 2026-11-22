@@ -200,6 +200,17 @@ extern int winsys_bmp_dirty_bit_neg;
 #define MVR_FRAME_NUMBER (*(int*)(220 + MVR_190_STRUCT))
 #define MVR_BYTES_WRITTEN MEM((212 + MVR_190_STRUCT))
 
+// Clip length limit, for FEATURE_OVERRIDE_MOVIE_30_MIN_LIMIT (these two are
+// verified, unlike the MVR values above). 0xE074ECC6 returns the literal
+// 1799000 ms (29:59), or 449000 ms (7:29) in High Frame Rate mode; the
+// DlgLiveView per-second handler (0xE0BD24F0) stops the clip when the
+// elapsed ms equals it. Each pool word has one load (ldr at 0xE074ECD0 /
+// 0xE074ED6C) and the value is only used there and, divided by 1000, as a
+// cap for the remaining-time display (0xE08CD028, 0xE08CCF32).
+// Both words are in the 64 kB page 0xE0740000: one remapped page.
+#define MVR_TIME_LIMIT_NORMAL_FPS 0xE074ED68
+#define MVR_TIME_LIMIT_HIGH_FPS   0xE074F168
+
 // XCM_New 0xE0174FA4 allocates the XCM on the heap, so there is no fixed address.
 // XCM_GetContext 0xE0175274 returns xcm + idx*0x7A0 + 0x10; context 0 = XCM + 0x10 (as on R5).
 #define XCM_PTR *(unsigned int *)0x14B2D8   // _pXCM

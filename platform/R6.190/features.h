@@ -27,6 +27,11 @@
 #define CONFIG_SGI_HANDLERS
 #define CONFIG_MMU_REMAP
 
+// Movie menu: MOV/MP4 time limit (patches MVR_TIME_LIMIT_* at runtime).
+// RECORDING is always 0 on R6 for now (PROP_MVR_REC_START is on the
+// handler deny list), so changes during recording are not blocked.
+#define FEATURE_OVERRIDE_MOVIE_30_MIN_LIMIT
+
 #undef CONFIG_CRASH_LOG
 #undef CONFIG_PROP_REQUEST_CHANGE
 #undef CONFIG_AUTOBACKUP_ROM
