@@ -239,7 +239,12 @@ extern int winsys_bmp_dirty_bit_neg;
 // MVR_190_STRUCT is the R5 address and NOT valid on R6; movie features stay disabled.
 #define MVR_190_STRUCT (*(void**)0x1ed8)
 #define div_maybe(a,b) ((a)/(b))
-#define MVR_BUFFER_USAGE 70 /* obviously wrong, don't try and record video */
+/* Not known on R6. 1, not a made-up 70: since RECORDING works (from
+ * PROP_SHOOTING_TYPE), bitrate.c pauses ML's LiveView tasks while
+ * MVR_BUFFER_USAGE > buffer.warning.level (30..100), so any fake value at
+ * or above the user's level would stall them during every recording.
+ * Not 0: an unsigned "0 > level" is a -Wtype-limits error. */
+#define MVR_BUFFER_USAGE 1
 #define MVR_FRAME_NUMBER (*(int*)(220 + MVR_190_STRUCT))
 #define MVR_BYTES_WRITTEN MEM((212 + MVR_190_STRUCT))
 
