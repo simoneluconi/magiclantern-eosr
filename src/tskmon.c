@@ -205,6 +205,11 @@ static void tskmon_stack_checker(struct task *next_task)
             return; // uses 264 of 512, 248 free
         #endif
 
+        #if defined(CONFIG_R6)
+        if (streq(task_name, "idle") && free > 64)
+            return; // one per core, 256 byte stacks, 128 / 248 free
+        #endif
+
         bmp_printf(FONT(FONT_MED, free < 128 ? COLOR_RED : COLOR_WHITE, COLOR_BLACK), 0, 0, 
             "[%d] %s: stack %s: free=%d used=%d ",
             id, task_name,
