@@ -208,6 +208,10 @@
 
 #ifdef CONFIG_5DC
 #define PROP_EFIC_TEMP          0x80030013
+#elif defined(CONFIG_R6_190)
+// No EFIC temperature property here. Use Canon's TempSvc sensor "A"
+// (I2C sensor read once a second), value is rounded deg C + 128.
+#define PROP_EFIC_TEMP          0x8003009E
 #else
 #define PROP_EFIC_TEMP          0x80030014
 #endif

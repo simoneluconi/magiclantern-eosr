@@ -9,6 +9,9 @@
 #define FEATURE_SHOW_SHUTTER_COUNT
 #define FEATURE_SHOW_GUI_EVENTS
 
+// "Internal Temp": read-only prop handler, see EFIC_CELSIUS in consts.h
+#define FEATURE_SHOW_CMOS_TEMPERATURE
+
 // CONFIG_TSKMON is on by default
 #define FEATURE_SHOW_TASKS
 #define FEATURE_SHOW_CPU_USAGE

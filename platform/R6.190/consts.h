@@ -47,6 +47,11 @@
 
 #define CANON_SHUTTER_RATING 300000 // Canon's official rating for R6
 
+// PROP_EFIC_TEMP is TempSvc sensor "A" on R6 (see property.h). TempSvc
+// (0xE099B132) publishes ((t16 + 8) >> 4) + 128, t16 in 1/16 deg C.
+#define EFIC_CELSIUS ((int)efic_temp - 128)
+#define EFIC_TEMP_HELP "Canon's temperature sensor A (I2C). Location not known."
+
 // DispOperator_PropertyMasterSetDisplayTurnOffOn 0xE0751460 caches the requested
 // state here (1 = on). Not yet confirmed on the camera.
 #define DISPLAY_IS_ON               (*(int *)0xEF48)
