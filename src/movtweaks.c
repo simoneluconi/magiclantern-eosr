@@ -966,6 +966,13 @@ static void change_mov_time_limit(void* priv, int delta)
     // We deliberately fall through if delta == 0,
     // to allow restoring saved settings without adjusting them.
 
+#ifdef MVR_TIME_LIMIT_MAX_SEC
+    // The camera's movie writer can't take longer clips (see consts.h):
+    // no OFF, nothing above the maximum. Also clamps a saved value.
+    if (mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit > MVR_TIME_LIMIT_MAX_SEC)
+        mov_time_limit = MVR_TIME_LIMIT_MAX_SEC;
+#endif
+
     // We have our target max time. If user requests 30 min,
     // we revert to stock, which technically is 29m 59s.
     // Otherwise, we patch in the new limit.

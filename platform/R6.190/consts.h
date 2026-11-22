@@ -211,6 +211,16 @@ extern int winsys_bmp_dirty_bit_neg;
 #define MVR_TIME_LIMIT_NORMAL_FPS 0xE074ED68
 #define MVR_TIME_LIMIT_HIGH_FPS   0xE074F168
 
+// Longest limit the MP4 writer can take. mp4wInitializeMmlibParam
+// (0xE05F07CA, run at each recording start) sizes the per-file sample
+// tables for 108000 entries (pool word 0xE05F0BE8; one entry per video
+// frame), and MmLibCompose asserts when one is full (0xE03E7120, ...).
+// The tables restart only at a new file, and on exFAT the R6 does not
+// split at 4 GB, so a clip longer than 108000 frames (30:01 at 59.94p,
+// 15:00 at 119.88p) would crash the camera and leave an unplayable file.
+// Until the tables are patched too, allow only Canon's limit or less.
+#define MVR_TIME_LIMIT_MAX_SEC    (30 * 60)
+
 // XCM_New 0xE0174FA4 allocates the XCM on the heap, so there is no fixed address.
 // XCM_GetContext 0xE0175274 returns xcm + idx*0x7A0 + 0x10; context 0 = XCM + 0x10 (as on R5).
 #define XCM_PTR *(unsigned int *)0x14B2D8   // _pXCM

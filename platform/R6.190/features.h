@@ -28,8 +28,9 @@
 #define CONFIG_MMU_REMAP
 
 // Movie menu: MOV/MP4 time limit (patches MVR_TIME_LIMIT_* at runtime).
+// Only limits up to Canon's 29:59 for now, see MVR_TIME_LIMIT_MAX_SEC.
 // RECORDING is always 0 on R6 for now (PROP_MVR_REC_START is on the
-// handler deny list), so changes during recording are not blocked.
+// handler deny list), but the ML menu does not open while recording.
 #define FEATURE_OVERRIDE_MOVIE_30_MIN_LIMIT
 
 #undef CONFIG_CRASH_LOG
