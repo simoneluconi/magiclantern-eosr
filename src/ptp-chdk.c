@@ -554,7 +554,7 @@ PTP_HANDLER( PTP_OC_CHDK, 0 )
                 {
                     t -= r;
                     // cannot use send_ptp_data here
-                    context->send_data(context->handle,buf,r,tmp,0,0,0);
+                    ptp_send_part(context,buf,r,tmp);
                     tmp = 0;
                 }
                 FIO_CloseFile(f);

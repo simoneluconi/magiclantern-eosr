@@ -20,6 +20,13 @@
 
 #define BUF_SIZE 128 * 1024
 
+struct ptp_context;
+
+/** Send one part of a data phase; total is the full size on the first
+ * part and 0 after. Returns 0 on success. Waits for completion on
+ * cameras where send_data() is asynchronous (CONFIG_PTP_ASYNC_SEND). */
+int ptp_send_part(struct ptp_context *data, const void *buf, int size, int total);
+
 /** @} */
 
 struct ptp_handle;
