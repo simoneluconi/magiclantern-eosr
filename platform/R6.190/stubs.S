@@ -27,13 +27,14 @@
 
 #include <stub.h>
 
-/* All functions are Thumb. */
+/* All functions are Thumb, except memcpy_dryos (ARM). */
 
 
 /** Startup **/
 NSTUB(MAIN_FIRMWARE_ADDR, firmware_entry)                 // also known as 2nd stage loader, boot2 or DryOS loader
 THUMB_FN(0xe07d4e60,  dcache_clean)                       // call from firmware_entry() at 0xE0100058 / 0xE010008E; loop with MCR p15 c7,c10,1; DSB
 THUMB_FN(0xe07d4f34,  icache_invalidate)                  // call from firmware_entry() at 0xE0100062 / 0xE0100098; loop with MCR p15 c7,c5,1; c7,c1,6; c7,c1,0; ISB
+THUMB_FN(0xe0154920,  dcache_clean_multicore)             // PL310 clean by PA: each 32-byte line to 0xC11007B0, then cache sync 0xC1100730. Same code as the bootloader's 0xE000D870, which its MMU table copy (0xE000D75C) calls after dcache_clean
 THUMB_FN(0xe01000ec,  cstart)                             // call from firmware_entry() at 0xE0100022 (via BR_BR_CSTART); calls bzero32 and create_init_task(..., init_task, ...)
 THUMB_FN(0xe07db168,  bzero32)                            // call from cstart() at 0xE0100138; zeros out a data structure
 THUMB_FN(0xe0277618,  create_init_task)                   // call from cstart() at 0xE010019A only on core0; low-level DryOS initialization
@@ -48,6 +49,7 @@ DATA_PTR(    0x1028,  current_task)                       // from task switch/sc
 DATA_PTR(    0x4100,  task_max)                           // entry in SysConfig struct 0x40EC+0x14 (0xE01652F0 copies dryos_init_info.task_max); used by task pool init 0xE011E810
 THUMB_FN(0xe07c1cda,  msleep)                             // SystemIF::KerSys.c; registered as eventproc "SleepTask" (0xE011271A)
 THUMB_FN(0xe07b93a6,  task_create)                        // SystemIF::KerTask.c; used to start TaskMain (0xE0100B46), GuiMainTask (0xE04DE4C6)
+THUMB_FN(0xe07b95be,  task_create_ex)                     // SystemIF::KerTask.c; as task_create, plus a 6th arg: the CPU (asserts if > 1). Called from 0xE025CE20, 0xE07D5C48, 0xE07DAB36
 
 /** File I/O **/
 THUMB_FN(0xe07b3676,  _FIO_OpenFile)                      // Storage::Storage.c Open
@@ -101,6 +103,18 @@ THUMB_FN(0xe0123774,  vsnprintf)                          // called by LogFile_p
 DATA_PTR(    0x413c,  task_dispatch_hook)                 // called in task switch 0xE07C1396/0xE07C13FE as hook(reason, prev_task, next_task) before current_task is updated
 THUMB_FN(0xe011e900,  task_trampoline)                    // task_create -> e03c432c -> prepare_task_trampoline (e011e920) passes task_trampoline+1 to e014258e
 THUMB_FN(0xe02cac34,  _get_task_info_by_id)               // called just before " CORE : %d\n" in exception dump (0xE01AEAAE); fills task_attr V5
+
+/** Interrupts, inter-core RPC (for CONFIG_RPC, not enabled yet) **/
+THUMB_FN(0xe0164540,  send_software_interrupt)            // (sgi, cpu_mask): GICD_SGIR 0xC1001F00 = cpu_mask << 16 | sgi; DryOS sends SGI 0xA with it to the other core (0xE07C1166)
+// The next two are RAM code: firmware_entry (0xE0100076) copies ROM 0xE2039F20-0xE203C46C
+// to 0xDFFC7000-0xDFFC954C before cstart, so they exist before any ML code runs.
+// See M50.110 for why _request_RPC must not be called directly (use request_RPC()).
+THUMB_FN(0xdffc7d72, _request_RPC)                        // ROM copy at 0xE203AC92; (func, arg): stores the request and sends SGI 0xC to the other core, -1 on timeout. A NULL request (0xDFFC7D18) parks the other core
+THUMB_FN(0xdffc7d92,  clear_RPC_request)                  // ROM copy at 0xE203ACB2; 0x20 after _request_RPC, as on M50; clears the request slot under the same spinlock, returns 0
+
+/** MMU (for CONFIG_MMU / CONFIG_MMU_REMAP, not enabled yet) **/
+THUMB_FN(0xe07d4992,  change_mmu_tables)                  // (ttbr0, ttbr1, cpu_id): DACR, TTBR0, TTBR1, CONTEXTIDR, TTBCR = 7, local TLBIALL. Same code as the bootloader's MMU enable 0xE0004A26; no caller in main firmware
+ARM32_FN(0xe07da0c8,  memcpy_dryos)                       // ARM code (Thumb callers use BLX, e.g. 0xE0100E4A; ~3000 calls). In ROM, after MAIN_FIRMWARE_ADDR, needs no setup; see 200D.101
 
 /** Recursive locks **/
 THUMB_FN(0xe07d5cc8,  CreateRecursiveLock)                // SystemIF::KerMisc.c; called with "PCOMNET_WINE CBMan" (0xE0AC58D4)

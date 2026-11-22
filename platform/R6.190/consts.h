@@ -31,6 +31,27 @@
 /* DryOS assert 0xE08D7714 reads the handler from 0x4000, setter 0xE08D7756 */
 #define DRYOS_ASSERT_HANDLER        0x4000
 
+/* For CONFIG_SGI_HANDLERS (not enabled yet). The IRQ dispatcher (0xE022E0CE)
+ * calls entry [GIC id] of the table that 0x4008 points to; entries are
+ * {func, arg}, an empty one gives "Illegal GIC inter...". Same as 850D.
+ * 0x4008 is initialised data (0x000FBA34, copied by firmware_entry from ROM
+ * 0xE1FBE8B0 to 0x4000), so it is valid before ML runs. At boot Canon
+ * registers SGI 0xA, 0xB, 0xC (RPC) and 0xD (0xE0142554, 0xE01426C0,
+ * 0xDFFC7BEE, 0xDFFC7E02); slots 0-9, which ML searches, are not checked on
+ * the camera yet. */
+#define DRYOS_SGI_HANDLERS_PTR      0x4008
+
+/* For CONFIG_MMU (not enabled yet): Canon's MMU table template in ROM,
+ * 0x4900 bytes in the layout src/mmu_utils.c expects. The bootloader
+ * (0xE000D728 / 0xE000D75C) copies it from 0xE0000000 to 0xDFFC0000 and
+ * fixes the TTBR0 L1 entries at +0x4800 / +0x4880; the live table read on
+ * the camera differs from the template only there. We copy the template,
+ * like M50 / 850D, not the live table: it is what Canon copies too, and it
+ * cannot change under us (Canon's flash code temporarily unmaps ROM in the
+ * live table, and patch_mmu.c reads memory flags from this table every
+ * time a patch is applied). */
+#define CANON_ORIG_MMU_TABLE_ADDR   0xE0000000
+
 // GetGUIMode 0xE079A692: ldr r0,=0x8D00; ldr r0,[r0,#0x70]
 #define CURRENT_GUI_MODE            (*(int*)0x8D70)
 
