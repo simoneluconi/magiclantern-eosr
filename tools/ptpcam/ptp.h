@@ -50,8 +50,11 @@ struct _PTPContainer {
 typedef struct _PTPContainer PTPContainer;
 
 /* PTP USB Bulk-Pipe container */
-/* USB bulk max max packet length for high speed endpoints */
-#define PTP_USB_BULK_HS_MAX_PACKET_LEN	512
+/* USB bulk max packet length. 512 for high speed, 1024 for SuperSpeed
+ * (e.g. Canon R6). The first read of a data phase must be at least one
+ * packet long, or a SuperSpeed camera's 1024-byte packet overflows it
+ * and the camera is left stuck mid-transaction. 1024 works for both. */
+#define PTP_USB_BULK_HS_MAX_PACKET_LEN	1024
 #define PTP_USB_BULK_HDR_LEN		(2*sizeof(uint32_t)+2*sizeof(uint16_t))
 #define PTP_USB_BULK_PAYLOAD_LEN	(PTP_USB_BULK_HS_MAX_PACKET_LEN-PTP_USB_BULK_HDR_LEN)
 #define PTP_USB_BULK_REQ_LEN	(PTP_USB_BULK_HDR_LEN+5*sizeof(uint32_t))
