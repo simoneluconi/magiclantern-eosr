@@ -128,6 +128,20 @@ void bmp_draw_to_idle(int value) { bmp_idle_flag = value; }
 struct MARV *rgb_vram_info = NULL;
 static uint8_t *bmp_vram_indexed = NULL;
 
+#if defined(CONFIG_DIGIC_X) && !defined(CONFIG_COMPOSITOR_DEDICATED_LAYER)
+// One bit per pixel of bmp_vram_indexed, set while the pixel in Canon's
+// layer is one that refresh_yuv_from_rgb() wrote (opaque). Transparent
+// pixels are not written there, so Canon's graphics stay visible; without
+// this, a pixel that ML makes transparent again would keep ML's old colour,
+// e.g. old digits stay under new ones on the LiveView info bars, whose
+// background is transparent (COLOR_BG). NULL if it couldn't be allocated
+// (the old behaviour).
+static uint32_t *bmp_drawn_mask = NULL;
+#define BMP_DRAWN_MASK_SIZE (BMP_VRAM_SIZE / 8)
+#define BMP_DRAWN_BIT(n)    (1u << ((n) & 31))
+#define BMP_DRAWN_WORD(n)   bmp_drawn_mask[(n) >> 5]
+#endif
+
 // bmp_vram() doesn't check this: before bmp_init() it would return
 // NULL + BMP_HDMI_OFFSET, and drawing would overwrite low DryOS RAM.
 int bmp_vram_indexed_ready(void)
@@ -258,16 +272,29 @@ void refresh_yuv_from_rgb(void)
         // Shall we use per-camera constants in bmp.c? Or maybe get this at runtime
         // from Ximr / XCM?
         uint32_t *rgb_row = rgb_data;
+        uint32_t n = 0;     /* pixel index in bmp_vram_indexed */
         for (uint y = 0; y < BMP_H_PLUS - BMP_H_MINUS; y++ )
         {
             rgb_data = rgb_row;
-            for(uint x = 0; x < BMPPITCH; x++ )
+            for(uint x = 0; x < BMPPITCH; x++, n++)
             {
                 uint32_t rgb = indexed2rgb(*b);
                 if ((rgb & 0xff000000) == 0x00000000)
+                {
+                    if (bmp_drawn_mask && (BMP_DRAWN_WORD(n) & BMP_DRAWN_BIT(n)))
+                    {
+                        /* ours until now: erase it, as rgba_buffer_clear() does */
+                        *rgb_data = 0x00000000;
+                        BMP_DRAWN_WORD(n) &= ~BMP_DRAWN_BIT(n);
+                    }
                     rgb_data++;
+                }
                 else
+                {
                     *rgb_data++ = rgb;
+                    if (bmp_drawn_mask)
+                        BMP_DRAWN_WORD(n) |= BMP_DRAWN_BIT(n);
+                }
                 b++;
             }
             rgb_row = rgb_row + BMP_LAYER_WIDTH;
@@ -320,14 +347,18 @@ void rgba_buffer_clear()
     if (bmp_vram_indexed == NULL) return;
     uint8_t *b = bmp_vram_indexed;
     uint32_t *rgb_row = (uint32_t *)rgb_vram_info->bitmap_data;
+    uint32_t n = 0;     /* pixel index in bmp_vram_indexed */
     for (int y = 0; y < BMP_H_PLUS - BMP_H_MINUS; y++)
     {
-        for (int x = 0; x < BMPPITCH; x++, b++)
+        for (int x = 0; x < BMPPITCH; x++, b++, n++)
         {
-            if (indexed2rgb(*b) != 0x00000000)
+            int drawn = bmp_drawn_mask && (BMP_DRAWN_WORD(n) & BMP_DRAWN_BIT(n));
+            if (indexed2rgb(*b) != 0x00000000 || drawn)
             {
                 *b = 0;
                 rgb_row[x] = 0x00000000;
+                if (drawn)
+                    BMP_DRAWN_WORD(n) &= ~BMP_DRAWN_BIT(n);
             }
         }
         rgb_row += BMP_LAYER_WIDTH;
@@ -1575,6 +1606,12 @@ static void bmp_init(void* unused)
         memset(bmp_vram_indexed, COLOR_TRANSPARENT_BLACK, BMP_VRAM_SIZE);
     else
         ASSERT(1);
+    #if defined(CONFIG_DIGIC_X) && !defined(CONFIG_COMPOSITOR_DEDICATED_LAYER)
+    // nothing drawn yet; without it, transparent pixels are just skipped
+    bmp_drawn_mask = malloc(BMP_DRAWN_MASK_SIZE);
+    if (bmp_drawn_mask != NULL)
+        memset(bmp_drawn_mask, 0, BMP_DRAWN_MASK_SIZE);
+    #endif
 #endif
 
     _update_vram_params();
