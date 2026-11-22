@@ -1037,6 +1037,8 @@ static void waveform_init()
 #ifdef FEATURE_WAVEFORM
     if (!waveform)
         waveform = malloc(WAVEFORM_WIDTH * WAVEFORM_HEIGHT);
+    if (!waveform)
+        return; /* waveform_add_pixel and waveform_draw_image check for NULL */
     bzero32(waveform, WAVEFORM_WIDTH * WAVEFORM_HEIGHT);
 #endif
 }
