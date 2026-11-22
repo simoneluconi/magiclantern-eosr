@@ -86,6 +86,23 @@
         return bmp_buf;
     }
 
+#ifdef FEATURE_VRAM_RGBA
+    /* bmp_vram_raw() is Canon's (or our) RGBA layer here, 4 bytes per
+     * pixel, not an 8-bit 960-pitch buffer, and "idle" (real ^ 0x80000)
+     * would point nowhere. Code that draws through these pointers (zebras,
+     * false color, focus peaking) must write ML's indexed buffer, which
+     * refresh_yuv_from_rgb() converts. There is no back buffer: real and
+     * idle are the same. NULL before bmp_init() (callers check). */
+    uint8_t* bmp_vram_real()
+    {
+        return bmp_vram_indexed_ready() ? bmp_vram() : NULL;
+    }
+
+    uint8_t* bmp_vram_idle()
+    {
+        return bmp_vram_real();
+    }
+#else
     uint8_t* bmp_vram_real()
     {
         return (uint8_t *)((uintptr_t)BMP_VRAM_START(bmp_vram_raw()) + BMP_HDMI_OFFSET);
@@ -100,6 +117,7 @@
         return (uint8_t *)((uintptr_t)bmp_vram_real() ^ 0x80000);
     #endif
     }
+#endif /* FEATURE_VRAM_RGBA */
 #endif
 
 static int bmp_idle_flag = 0;
@@ -157,6 +175,10 @@ uint8_t * bmp_vram(void)
 // 1 = copy idle to BMP
 void bmp_idle_copy(int direction, int fullsize)
 {
+#ifdef FEATURE_VRAM_RGBA
+    // real and idle are the same buffer, nothing to copy
+    return;
+#endif
     uint8_t* real = bmp_vram_real();
     uint8_t* idle = bmp_vram_idle();
     ASSERT(real)
