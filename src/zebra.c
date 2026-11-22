@@ -406,7 +406,32 @@ PROP_HANDLER(PROP_LCD_POSITION)
 /* from powersave.c */
 extern int idle_globaldraw_disable;
 
-int get_global_draw() // menu setting, or off if 
+#ifdef CONFIG_LV_INFO_AFTER_MODE_CHANGE_MS
+/* Canon shows its shooting info for a while after the shooting mode
+ * changes (photo <-> movie, mode dial), even on the clean INFO screen,
+ * and then hides it by itself; don't draw over it meanwhile. */
+static int lv_mode_changed_recently(void)
+{
+    static int last_mode = -1;
+    static int changed_at = 0;
+    static int changed = 0;
+
+    int mode = shooting_mode | (is_movie_mode() << 16);
+    int now = get_ms_clock();
+    if (mode != last_mode)
+    {
+        if (last_mode != -1)
+        {
+            changed_at = now;
+            changed = 1;
+        }
+        last_mode = mode;
+    }
+    return changed && now - changed_at < CONFIG_LV_INFO_AFTER_MODE_CHANGE_MS;
+}
+#endif
+
+int get_global_draw() // menu setting, or off if
 {
 #ifdef FEATURE_GLOBAL_DRAW
     
@@ -436,9 +461,16 @@ int get_global_draw() // menu setting, or off if
     
     if (lv && ZEBRAS_IN_LIVEVIEW)
     {
-        return 
+        #ifdef CONFIG_LV_INFO_AFTER_MODE_CHANGE_MS
+        /* every time, so that no mode change is missed */
+        int mode_changed = lv_mode_changed_recently();
+        #endif
+        return
             lv_disp_mode == 0 &&
-            !idle_globaldraw_disable && 
+            !idle_globaldraw_disable &&
+            #ifdef CONFIG_LV_INFO_AFTER_MODE_CHANGE_MS
+            !mode_changed &&
+            #endif
             bmp_is_on() &&
             DISPLAY_IS_ON && 
             !RECORDING_H264_STARTING &&

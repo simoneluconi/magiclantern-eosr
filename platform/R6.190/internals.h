@@ -61,6 +61,11 @@
  * free while recording (src/lens.c, free_space_update). */
 #define CONFIG_REC_INDICATOR_IN_TOP_BAR
 
+/** After a shooting mode change (photo <-> movie, mode dial), Canon shows
+ * its info for 2..3 s even on the clean INFO screen (seen on camera):
+ * no ML overlays meanwhile (src/zebra.c, get_global_draw). */
+#define CONFIG_LV_INFO_AFTER_MODE_CHANGE_MS 3000
+
 /** ML's LV image (get_yuv422_vram) is Canon's FaceYuv buffer, see
  * faceyuv.c: FACEYUV_WIDTH x FACEYUV_HEIGHT UYVY with signed chroma,
  * shown on ML's whole 720x480 area (src/vram.c, src/imgconv.h). */
