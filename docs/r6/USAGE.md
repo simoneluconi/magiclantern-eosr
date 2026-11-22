@@ -46,7 +46,17 @@ Only features the R6 does not have already are enabled. Every new option starts 
 
 ### Overlays (photo mode)
 
-**Spotmeter**, **False color** and **Waveform** in the Overlay menu. They need Global Draw and Canon's clean INFO screen. They work in photo LiveView, on the screen or in the viewfinder, but not yet in movie mode.
+**Spotmeter**, **False color**, **Waveform** and **Vectorscope** in the Overlay menu. They need Global Draw and Canon's clean INFO screen. They work in photo LiveView, but not yet in movie mode.
+
+### Modules: Lua scripts and the file manager
+
+1. Open the **Modules** tab, select **lua** and/or **file_man** and press **SET** to mark them for loading.
+2. Restart the camera: modules are loaded at start-up. If something goes wrong while loading, hold **SET** while powering on to start without modules.
+3. **file_man** adds **Debug > File Manager**, a browser for the card. It can also delete files.
+4. **lua** adds the **Scripts** tab, with one entry per `.lua` file in `ML/scripts` on the card. Select a script, press **Q** and choose **Run Script**. **Autorun** starts it at every power-on.
+   - The example scripts (calc, pong, sokoban, menutest, hello...) were tested.
+   - Scripts that change camera settings or take pictures fail, because this build does not allow property writes. Avoid **api_test**: it tests those calls too.
+   - Script tasks get at most 32 KiB of stack on the R6.
 
 ### Display > Red display and colour schemes
 

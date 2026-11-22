@@ -38,7 +38,8 @@ this fork is only maintained and tested for the R6.
 | **Clip length up to 59:59** instead of 29:59 (Canon's movie writer and player are patched too) | Movie > MOV/MP4 time limit | works, a 60 min clip records and plays back on the camera |
 | **Heat timer** 2x / 3x / 4x: slows Canon's time-based 4K heat limit; the temperature sensors still protect the camera | Movie > Heat timer | works |
 | Temperatures, heat timer and budget, in °C or °F | Debug > Internal Temp, LiveView top bar | works |
-| Spotmeter, false color, waveform | Overlay | works in photo mode |
+| Spotmeter, false color, waveform, vectorscope | Overlay | works in photo mode |
+| Modules: **Lua scripts** and the file manager | Modules, Scripts, Debug > File Manager | works (example scripts tested) |
 | Red display for night / astro, ML colour schemes incl. "Pure Red" | Display | works |
 | Motion detect (pictures through Canon's own shutter path) | Shoot > Motion Detect | works |
 | Lens info, depth of field, auto exposure values | Focus, Expo | works |
@@ -47,10 +48,12 @@ this fork is only maintained and tested for the R6.
 
 ## What does not work (yet)
 
-- **Overlays in movie mode**: spotmeter, false color and waveform only draw in photo LiveView.
+- **Overlays in movie mode**: spotmeter, false color, waveform and vectorscope only draw in photo LiveView.
 - **ML menu while recording**: it closes again right away (Canon's menu can't be opened under it while recording).
 - **Trimming long clips on the camera**: clips over 30 minutes play back on the camera, but Canon's movie editor keeps its own limits.
-- **Modules** (dual ISO, MLV / RAW video, Lua scripts...) are not included.
+- **Other modules** (dual ISO, MLV / RAW video, silent pictures...) are not included: they need parts of ML that don't exist yet on DIGIC X.
+- **Lua scripts that change camera settings** (exposure, shooting) fail: the R6 build does not allow property writes.
+- **Beeps**: ML's sounds are not played on the R6.
 - ML overlays are not shown in the viewfinder.
 - Zebras, focus peaking, histogram, intervalometer and bulb timer are **not enabled on purpose**: the R6 has its own.
 
@@ -95,6 +98,10 @@ make ARM_BINPATH=... CONFIG_PTP=y CONFIG_PTP_CHDK=y         # same, with USB fil
 
 `magiclantern.zip` contains `autoexec.bin` and the `ML/` folder. Always copy `autoexec.bin` and
 `ML/modules/R6_190.sym` from the same build.
+
+The platform build packs the modules listed in `platform/R6.190/modules.included` (`file_man`, `lua`)
+but does not rebuild them if they already exist. After changing module code, rebuild it with
+`make -C modules/lua ARM_BINPATH=...` and use `modules/lua/build/lua.mo`.
 
 The R6 work is on the branch `r6.190-clean`. Its R6-specific code is mostly in `platform/R6.190/`,
 plus generic changes in `src/` that other cameras can opt into (for example
