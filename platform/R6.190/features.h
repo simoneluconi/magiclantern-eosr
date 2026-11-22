@@ -61,6 +61,11 @@
 // on R6, so FEATURE_INTERVALOMETER / FEATURE_BULB_TIMER stay off.
 #define FEATURE_MOTION_DETECT
 
+// Debug > Screenshot, as on R / RP / M50 / 850D: ML's graphics, plus the
+// LV image where ML has one (FaceYuv, photo mode). Canon's own graphics
+// are in a layer ML does not read, so they are not in the file.
+#define FEATURE_SCREENSHOT
+
 #undef CONFIG_CRASH_LOG
 #undef CONFIG_PROP_REQUEST_CHANGE
 #undef CONFIG_AUTOBACKUP_ROM
