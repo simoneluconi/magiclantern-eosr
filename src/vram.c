@@ -12,6 +12,12 @@
 #include "zebra.h"
 #include "raw.h"
 
+#ifdef CONFIG_FACEYUV_LV
+/* platform code: ML's LV image is Canon's FaceYuv buffer */
+extern void * faceyuv_lv_buffer(void);  /* CPU address of the current frame, NULL if no live image */
+extern int faceyuv_lv_y0(void);         /* ML row of the image's top row */
+#endif
+
 //~ #define CONFIG_DEBUGMSG 1
 
 /**
@@ -346,6 +352,23 @@ void _update_vram_params()
     os.off_43 = 0;
     os.off_169 = 0;
     os.off_1610 = 0;
+#elif defined(CONFIG_FACEYUV_LV)
+    // LV image = Canon's FaceYuv buffer (get_yuv422_vram), the whole frame
+    // on ML's 720x480 area. Its top row is at faceyuv_lv_y0() in ML
+    // coordinates (R6: 0 on the LCD, -30 in the EVF); the platform marks
+    // the params dirty when that changes. HDMI is not handled (no image).
+    vram_lv.width = FACEYUV_WIDTH;
+    vram_lv.height = FACEYUV_HEIGHT;
+    vram_lv.pitch = vram_lv.width * 2;
+    os.x0 = 0;
+    os.y0 = faceyuv_lv_y0();
+    os.x_ex = 720;
+    os.y_ex = 480;
+    os.x_max = os.x0 + os.x_ex;
+    os.y_max = os.y0 + os.y_ex;
+    os.off_43 = 0;
+    os.off_169 = 0;
+    os.off_1610 = 0;
 #elif defined(CONFIG_R5) || defined(CONFIG_R6)
     // false, depends on Panel, HDMI, EVF and if HDMI is clean or not.
     vram_lv.width = 1024;
@@ -440,6 +463,14 @@ void _update_vram_params()
     bm2lv.tx = 0;
     bm2lv.ty = 0;
     //~ bm2lv.ty = (PLAY_MODE || QR_MODE)? -48 : 0;     
+#elif defined(CONFIG_FACEYUV_LV)
+    // ML's 720x480 area -> the whole FaceYuv buffer, (os.x0, os.y0) -> (0, 0).
+    // R6: sx = 910, sy = 908; in the EVF (os.y0 = -30) ty = 27, so ML rows
+    // -30..449 map to LV rows 0..425.
+    bm2lv.sx = 1024 * vram_lv.width / os.x_ex;
+    bm2lv.sy = 1024 * vram_lv.height / os.y_ex;
+    bm2lv.tx = -((os.x0 * bm2lv.sx) >> 10);
+    bm2lv.ty = -((os.y0 * bm2lv.sy) >> 10);
 #else
     // bmp to lv transformation
     // LCD: (0,0) -> (0,0)
@@ -654,6 +685,28 @@ struct vram_info * get_yuv422_vram()
 {
     vram_params_update_if_dirty();
     
+#ifdef CONFIG_FACEYUV_LV
+    /* No LV display buffer (YUV422_LV_BUFFER_DISPLAY_ADDR is 0): the
+     * platform returns the uncached alias of Canon's FaceYuv frame, used
+     * as is (no CACHEABLE).
+     * Callers often test ->vram and then read it again, while another
+     * task may call this in between. So vram_lv.vram is never set back to
+     * NULL once it held a frame (that memory stays valid RAM; page 0 is
+     * unmapped on R6). Without a live frame, return a copy with vram NULL. */
+    {
+        void * buf = faceyuv_lv_buffer();
+        if (buf)
+        {
+            vram_lv.vram = buf;
+            return &vram_lv;
+        }
+        static struct vram_info vram_lv_none;
+        vram_lv_none = vram_lv;
+        vram_lv_none.vram = NULL;
+        return &vram_lv_none;
+    }
+#endif
+
     if (digic_zoom_overlay_enabled()) // compute histograms and such on full-screen image
     {
         vram_lv.vram = (void*)CACHEABLE(YUV422_LV_BUFFER_1);

@@ -2,7 +2,9 @@
 #define _imgconv_h_
 
 
-#ifdef CONFIG_DIGIC_678X
+/* CONFIG_FACEYUV_LV: ML's LV image (Canon's FaceYuv buffer) has signed
+ * chroma (0 = neutral), as on DIGIC 4/5 */
+#if defined(CONFIG_DIGIC_678X) && !defined(CONFIG_FACEYUV_LV)
 #define UYVY_PACK(u,y1,v,y2) ((u + 0x80) & 0xFF) | (((y1) & 0xFF) << 8) | (((v + 0x80) & 0xFF) << 16) | (((y2) & 0xFF) << 24)
 #define UYVY_GET_U(uyvy) ((((uyvy)      ) - 0x80) & 0xFF)
 #define UYVY_GET_V(uyvy) ((((uyvy) >> 16) - 0x80) & 0xFF)

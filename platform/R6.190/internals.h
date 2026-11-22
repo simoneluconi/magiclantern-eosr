@@ -35,6 +35,11 @@
  * features or modules that R6 does not enable). */
 #define CONFIG_LIVEVIEW
 
+/** ML's LV image (get_yuv422_vram) is Canon's FaceYuv buffer, see
+ * faceyuv.c: FACEYUV_WIDTH x FACEYUV_HEIGHT UYVY with signed chroma,
+ * shown on ML's whole 720x480 area (src/vram.c, src/imgconv.h). */
+#define CONFIG_FACEYUV_LV
+
 /** PTP (only used when building with CONFIG_PTP=y):
  * send_data() is asynchronous, (handle, buf, size, total, callback, cb_priv, 0).
  * Canon's GetDeviceInfo (0xE02B4780) passes callback 0xE02B4761, which stores
