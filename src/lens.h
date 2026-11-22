@@ -342,14 +342,27 @@ extern const uint8_t codes_aperture[APERTURE_ARRAY_LEN];
 #define APEX1000_EC2RAW(apex) RSCALE(apex, 8, 1000)
 
 /* "Code768": signed APEX * 768, 256 per 1/3 EV. On cams with
- * CONFIG_EXPO_CODE768, PROP_APERTURE and PROP_APERTURE_AUTO carry it
- * as 2 bytes instead of ML's raw (1/8 EV) codes; one raw step is 96. */
+ * CONFIG_EXPO_CODE768, PROP_SHUTTER, PROP_APERTURE and their _AUTO
+ * variants carry it as 2 bytes instead of ML's raw (1/8 EV) codes;
+ * one raw step is 96. */
 static inline int code768_to_raw_steps(int code)
 {
     /* nearest 1/8 EV step (1/3 and 1/2 stops land on ML's usual codes) */
     return code >= 0 ? (code + 48) / 96 : -((48 - code) / 96);
 }
+
+static inline int raw_steps_to_code768(int steps)
+{
+    /* ML's 1/3 stop codes (+3, +5 in a stop) are exact thirds in Code768 */
+    int stop = steps >= 0 ? steps / 8 : -((7 - steps) / 8);
+    int frac = steps - stop * 8;
+    return stop * 768 + (frac == 3 ? 256 : frac == 5 ? 512 : frac * 96);
+}
+
+#define CODE768_TO_RAW_TV(code) (56 + code768_to_raw_steps(code))  /* 0 = 1 s, see APEX_TV */
 #define CODE768_TO_RAW_AV(code) (8 + code768_to_raw_steps(code))   /* 0 = f/1.0, see APEX_AV */
+#define RAW_TV_TO_CODE768(raw)  raw_steps_to_code768((int)(raw) - 56)
+#define RAW_AV_TO_CODE768(raw)  raw_steps_to_code768((int)(raw) - 8)
 
 // Conversions
 int raw2shutter_ms(int raw_shutter);

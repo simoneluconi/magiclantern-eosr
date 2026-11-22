@@ -32,9 +32,10 @@
  * 0xE02B7B54, SendObject 0xE02B6170). Split reads crashed the camera (ERR70). */
 #define CONFIG_PTP_RECV_ONCE
 
-/** PROP_APERTURE / PROP_APERTURE_AUTO are 2 bytes, signed APEX * 768
- * ("Code768", see src/lens.h) instead of ML's raw codes; seen on camera:
- * f/1.4 = 0x0300. The lens data uses the same unit: Canon converts the
+/** PROP_SHUTTER / PROP_APERTURE (and their _AUTO variants, if sent) are
+ * 2 bytes, signed APEX * 768 ("Code768", see src/lens.h) instead of ML's
+ * raw codes; seen on camera: f/1.4 = 0x0300, 1/125 = 0x1500, 1 s = 0,
+ * 4 s = 0xFA00. The lens data uses the same unit: Canon converts the
  * lens' raw apertures with (raw - 8) * 96 (0xE05702F4).
  * The R5 may well be the same; not checked. */
 #define CONFIG_EXPO_CODE768
