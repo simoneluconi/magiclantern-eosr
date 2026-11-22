@@ -35,11 +35,19 @@
 #define CONFIG_SGI_HANDLERS
 #define CONFIG_MMU_REMAP
 
-// Movie menu: MOV/MP4 time limit (patches MVR_TIME_LIMIT_* at runtime).
-// Only limits up to Canon's 29:59 for now, see MVR_TIME_LIMIT_MAX_SEC.
-// RECORDING is always 0 on R6 for now (PROP_MVR_REC_START is on the
-// handler deny list), but the ML menu does not open while recording.
+// Movie menu: MOV/MP4 time limit (patches MVR_TIME_LIMIT_* at runtime),
+// up to MVR_TIME_LIMIT_MAX_SEC; above Canon's 29:59 the movie writer is
+// patched too (MVR_WRITER_PATCHES).
 #define FEATURE_OVERRIDE_MOVIE_30_MIN_LIMIT
+
+// ML's LV overlays, with Canon's FaceYuv as the LV image (CONFIG_FACEYUV_LV).
+// They draw only while get_global_draw() allows it: in LV, in Canon's
+// LV_OVERLAYS_MODE 3 (the clean INFO screen, in photo and movie mode on
+// R6). The ones that read the image also need a FaceYuv frame:
+// photo mode, LCD or EVF alone (faceyuv.c).
+// Only what the R6 lacks; zebras, focus peaking and the histogram are
+// Canon's own on R6.
+#define FEATURE_GLOBAL_DRAW
 
 #undef CONFIG_CRASH_LOG
 #undef CONFIG_PROP_REQUEST_CHANGE
