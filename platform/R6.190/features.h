@@ -11,6 +11,8 @@
 
 // "Internal Temp": read-only prop handler, see EFIC_CELSIUS in consts.h
 #define FEATURE_SHOW_CMOS_TEMPERATURE
+// Submenu with all of Canon's temperature sensors (PROP_TEMP_* ids)
+#define FEATURE_SHOW_TEMP_SENSORS
 
 // CONFIG_TSKMON is on by default
 #define FEATURE_SHOW_TASKS

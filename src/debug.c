@@ -763,6 +763,61 @@ static MENU_UPDATE_FUNC(efictemp_display)
     );
 }
 #endif
+
+#ifdef FEATURE_SHOW_TEMP_SENSORS
+/* Canon's own temperature sensors, read-only (see PROP_TEMP_* in property.h).
+ * Sensor A is efic_temp (PROP_EFIC_TEMP). */
+static volatile uint32_t temp_dram;
+static volatile uint32_t temp_mimi_l;
+static volatile uint32_t temp_mimi_r;
+static volatile uint32_t temp_tft;
+static volatile uint32_t temp_sh;
+static volatile uint32_t temp_status;
+
+PROP_HANDLER(PROP_TEMP_DRAM)   { temp_dram   = buf[0]; }
+PROP_HANDLER(PROP_TEMP_MIMI_L) { temp_mimi_l = buf[0]; }
+PROP_HANDLER(PROP_TEMP_MIMI_R) { temp_mimi_r = buf[0]; }
+PROP_HANDLER(PROP_TEMP_TFT)    { temp_tft    = buf[0]; }
+PROP_HANDLER(PROP_TEMP_SH)     { temp_sh     = buf[0]; }
+PROP_HANDLER(PROP_TEMP_STATUS) { temp_status = buf[0]; }
+
+/* entry->priv points to the raw value: rounded deg C + 128 */
+static MENU_UPDATE_FUNC(temp_sensor_display)
+{
+    int raw = *(volatile uint32_t *) entry->priv;
+
+    if (raw == 0)
+    {
+        /* TempSvc publishes 0 until its first reading */
+        MENU_SET_VALUE("n/a");
+        return;
+    }
+    MENU_SET_VALUE("%d"SYM_DEGREE"C", raw - 128);
+    MENU_SET_RINFO("%d raw", raw);
+}
+
+static MENU_UPDATE_FUNC(temp_status_display)
+{
+    int status = temp_status;
+
+    MENU_SET_VALUE("%d", status);
+    if (status == 0)
+    {
+        MENU_SET_RINFO("none");
+    }
+    else if (status == 3 || status == 4)
+    {
+        /* name from Canon's GUI handler for PROP_TEMP_STATUS */
+        MENU_SET_RINFO("DISABLE_LV");
+    }
+
+    if (status != 0)
+    {
+        MENU_SET_WARNING(MENU_WARN_ADVICE,
+            "Canon reports an overheat level. Let the camera cool down.");
+    }
+}
+#endif
 #endif
 
 #if 0 // CONFIG_5D2
@@ -1156,6 +1211,63 @@ static struct menu_entry debug_menus[] = {
 	.help2 = "http://www.magiclantern.fm/forum/index.php?topic=9673.0",
 	 #endif
         //.essential = FOR_MOVIE | FOR_PHOTO,
+        #ifdef FEATURE_SHOW_TEMP_SENSORS
+        .help2 = "Open submenu for all Canon temperature sensors.",
+        .select = menu_open_submenu,
+        .submenu_width = 710,
+        .children = (struct menu_entry[]) {
+            {
+                .name = "DRAM",
+                .priv = (void *) &temp_dram,
+                .update = temp_sensor_display,
+                .icon_type = IT_ALWAYS_ON,
+                .help = "Sensor named DRAM in Canon's log. Reader not known.",
+            },
+            {
+                .name = "MIMI L",
+                .priv = (void *) &temp_mimi_l,
+                .update = temp_sensor_display,
+                .icon_type = IT_ALWAYS_ON,
+                .help = "Sensor named MIMIL in Canon's log. Location not known.",
+            },
+            {
+                .name = "MIMI R",
+                .priv = (void *) &temp_mimi_r,
+                .update = temp_sensor_display,
+                .icon_type = IT_ALWAYS_ON,
+                .help = "Sensor named MIMIR in Canon's log. Location not known.",
+            },
+            {
+                .name = "A",
+                .priv = (void *) &efic_temp,
+                .update = temp_sensor_display,
+                .icon_type = IT_ALWAYS_ON,
+                .help = "I2C sensor, location not known. Same as Internal Temp.",
+            },
+            {
+                .name = "TFT",
+                .priv = (void *) &temp_tft,
+                .update = temp_sensor_display,
+                .icon_type = IT_ALWAYS_ON,
+                .help = "I2C sensor, probably near the rear LCD (TFT).",
+            },
+            {
+                .name = "SH",
+                .priv = (void *) &temp_sh,
+                .update = temp_sensor_display,
+                .icon_type = IT_ALWAYS_ON,
+                .help = "Thermistor, probably at the shutter unit.",
+            },
+            {
+                .name = "Temp status",
+                .update = temp_status_display,
+                .icon_type = IT_ALWAYS_ON,
+                .help = "Canon's overheat level (PROP_TEMP_STATUS), 0 = none.",
+                .help2 = "3 and 4: Canon's GUI handles them as DISABLE_LV.",
+            },
+            MENU_EOL,
+        },
+        #endif
     },
 #endif
     #if 0 // CONFIG_5D2

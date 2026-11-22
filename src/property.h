@@ -206,12 +206,26 @@
 #define PROP_DL_ACTION          0x80020013 // 0 == end?
 #endif
 
+#ifdef CONFIG_R6_190
+// Canon's TempSvc reads 8 sensors once a second and publishes 6 of them
+// (ids from the table at 0xE0CC3D28, names from TempSvc's own debug print
+// at 0xE099AF2C). Value = rounded deg C + 128, 0 before the first reading.
+// The IISA / IISB sensors are read but not published.
+#define PROP_TEMP_DRAM          0x80030035
+#define PROP_TEMP_MIMI_L        0x800300C6
+#define PROP_TEMP_MIMI_R        0x8003008D
+#define PROP_TEMP_A             0x8003009E
+#define PROP_TEMP_TFT           0x80030081
+#define PROP_TEMP_SH            0x80030062
+#define PROP_TEMP_STATUS        0x8004000F  // Canon's overheat level, 0 = none
+#endif
+
 #ifdef CONFIG_5DC
 #define PROP_EFIC_TEMP          0x80030013
 #elif defined(CONFIG_R6_190)
 // No EFIC temperature property here. Use Canon's TempSvc sensor "A"
 // (I2C sensor read once a second), value is rounded deg C + 128.
-#define PROP_EFIC_TEMP          0x8003009E
+#define PROP_EFIC_TEMP          PROP_TEMP_A
 #else
 #define PROP_EFIC_TEMP          0x80030014
 #endif
