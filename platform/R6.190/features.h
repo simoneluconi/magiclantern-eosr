@@ -1,0 +1,18 @@
+#define FEATURE_VRAM_RGBA
+
+// Like R5: no dedicated layer, we draw into Canon's GUI layer
+#define CONFIG_COMPOSITOR_XCM
+
+// Subset of R5.152 features, only read-only diagnostics.
+// Left out: FEATURE_DONT_CLICK_ME (calls "dumpf"),
+// FEATURE_SHOW_FREE_MEMORY (allocates shoot memory).
+#define FEATURE_SHOW_SHUTTER_COUNT
+#define FEATURE_SHOW_GUI_EVENTS
+
+// CONFIG_TSKMON is on by default
+#define FEATURE_SHOW_TASKS
+#define FEATURE_SHOW_CPU_USAGE
+
+#undef CONFIG_CRASH_LOG
+#undef CONFIG_PROP_REQUEST_CHANGE
+#undef CONFIG_AUTOBACKUP_ROM
