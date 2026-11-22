@@ -176,6 +176,16 @@ THUMB_FN(0xe07c2d30,  _prop_cleanup)                      // PropertyMgr.c cmd 5
 THUMB_FN(0xe07c2786,  prop_register_slave)                // PropertyMgr.c cmd 3, copies propID list (list,count,handler,priv,token_handler)
 THUMB_FN(0xe07c2854,  _prop_request_change)               // PropertyMgr.c cmd 6 (prop,addr,len); called after "update inner version string. \"%s\"" (0xE01015DC)
 
+/** Shutter button (CONFIG_SW12_VIA_CC, see consts.h) **/
+// CameraConductor callbacks of the physical shutter switch, from andrewpoison's port (227138ec7).
+// Switch table 0xE0FE5C84 rows {7, 0xE0296519} / {8, 0xE029652F}; registered for MPU keys 5 / 6
+// (0xE033A9B8), which Canon calls from SIO3_ISR via 0xE033AA4A / 0xE033AA50 -> 0xE033AA0E -> 0xE06D30AE.
+// (status): 1 = pressed, else released. Leaf: strb status to [[0x10AB8]+0xDF] / [+0xE0], then
+// tail call to the event post 0xE0287C2E (SW1 0x20000400 on / 0x20000800 off, SW2 0x20001000 / 0x20002000):
+// two short IRQ-off sections, SetEventFlag, no wait; returns 0, or 7 after an assert if CC's event flag is bad.
+THUMB_FN(0xe0296518,  CC_SW1_CBR)
+THUMB_FN(0xe029652e,  CC_SW2_CBR)
+
 /** General FEATURE_VRAM_RGBA stubs **/
 //THUMB_FN(0xe0260a16,  VMIX_TransferRectangleToVram)       // via debug message "VMIX_TransferRectangleToVram %d %d"; not needed - reference for winsys_sem/XimrExe/_pXCM
 //THUMB_FN(0xe0233cc6,  RENDERER_InitializeScreen)          // via debug message "RENDERER_InitializeScreen %#x, %d, %#x"; not needed - reference for _rgb_vram_info

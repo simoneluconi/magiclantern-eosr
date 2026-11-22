@@ -171,6 +171,9 @@ CONFIG_INT("focus.units", focus_units, FOCUS_UNITS_METRIC);
 //~ static struct semaphore * lens_sem;
 static struct semaphore * focus_done_sem;
 //~ static struct semaphore * job_sem;
+#ifdef CONFIG_SW12_VIA_CC
+static struct semaphore * sw12_sem = 0;     /* SW1() / SW2(), see sw12_set() */
+#endif
 
 
 struct lens_info lens_info = {
@@ -2359,6 +2362,9 @@ lens_init( void* unused )
     lens_info.raw_shutter = 100;
 
     focus_done_sem = create_named_semaphore("focus_sem", SEM_CREATE_UNLOCKED);
+#ifdef CONFIG_SW12_VIA_CC
+    sw12_sem = create_named_semaphore("sw12_sem", SEM_CREATE_UNLOCKED);
+#endif
 #ifndef CONFIG_5DC
     menu_add("Movie Tweaks", lens_menus, COUNT(lens_menus));
 #endif
@@ -2366,12 +2372,149 @@ lens_init( void* unused )
 
 INIT_FUNC( "lens", lens_init );
 
+#ifdef CONFIG_SW12_VIA_CC
+/*
+ * SW1() / SW2() without a property write: call the CameraConductor ("cc")
+ * callbacks of the physical shutter switch, CC_SW1_CBR / CC_SW2_CBR, the way
+ * Canon's MPU interrupt does for the real button (platform stubs.S and
+ * consts.h). Ported from andrewpoison's R6 port (227138ec7), where it took
+ * pictures on the camera. Rules:
+ *  - only the order SW1 on, SW2 on, SW2 off, SW1 off; never an OFF for a
+ *    switch ML did not press. SW1(0) lets go of ML's SW2 first, SW2(1)
+ *    needs ML's own SW1;
+ *  - SW1 on only while Canon's switch path is the one the callbacks expect
+ *    (sw12_cc) and nothing is held or pending, by ML or by the button;
+ *  - the real button wins: while ML holds only SW1, if the switch bytes are
+ *    no longer what ML left there, the user has moved the button. ML then
+ *    sends nothing more and forgets its press; the user's own release ends
+ *    it through the MPU. (An OFF from ML while the user holds SW2 would leave
+ *    "SW2 held, SW1 released" in cc.) Once ML holds SW2 too, its SW2 OFF
+ *    always goes out, as in andrewpoison's port; the SW1 OFF after it only
+ *    if the bytes are still ML's.
+ * A half press by the user on top of ML's own cannot be seen (same byte).
+ */
+extern int CC_SW1_CBR(int status);
+extern int CC_SW2_CBR(int status);
+
+#define SW12_SW1 1
+#define SW12_SW2 2
+static int sw12_held = 0;   /* ML's own presses, SW12_SW1 | SW12_SW2 */
+
+static int sw12_ram_ok(uint32_t a)
+{
+    /* page 0 is unmapped on R6 */
+    return a >= 0x1000 && a < 0x40000000 && !(a & 3);
+}
+
+static int sw12_byte(uint32_t cc, int offset)
+{
+    return *(volatile uint8_t *)(cc + offset);
+}
+
+/* cc if the callbacks may be called now (read only), else 0.
+ * Every call: the pointer the callback and its event post dereference.
+ * A press also: the switch wrapper's copy, Canon's registered shutter
+ * callbacks are these two, the event flag is valid, and Canon neither
+ * drops nor diverts switch events right now. */
+static uint32_t sw12_cc(int press)
+{
+    uint32_t cc = MEM(CC_SW_CC_PTR);
+    if (!sw12_ram_ok(cc) || MEM(CC_SW_CC_PTR_POST) != cc)
+        return 0;
+    if (!press)
+        return cc;
+
+    uint32_t mgr = MEM(CC_SW_MGR_PTR);
+    if (MEM(CC_SW_CC_PTR_WRAP) != cc || !sw12_ram_ok(mgr) || !sw12_ram_ok(MEM(mgr)))
+        return 0;
+    uint32_t cbr = MEM(mgr);
+    if (MEM(cbr) != (uint32_t) &CC_SW1_CBR || MEM(cbr + 4) != (uint32_t) &CC_SW2_CBR)
+        return 0;
+    uint32_t ev = MEM(cc + CC_EVENT_FLAG);
+    if (!ev || (ev & 1))
+        return 0;
+    if (MEM(cc + CC_SW_GATE) || MEM(CC_SW_HACK_QUEUE))
+        return 0;
+    return cc;
+}
+
+/* the switch bytes are what ML's own presses left there */
+static int sw12_bytes_ok(uint32_t cc)
+{
+    return sw12_byte(cc, CC_SW1_BYTE) == !!(sw12_held & SW12_SW1)
+        && sw12_byte(cc, CC_SW2_BYTE) == !!(sw12_held & SW12_SW2);
+}
+
+static void sw12_call(uint32_t sw, int on)
+{
+    if (sw == SW12_SW1) CC_SW1_CBR(on);
+    else CC_SW2_CBR(on);
+
+    if (on) sw12_held |= sw;
+    else sw12_held &= ~sw;
+}
+
+static void sw12_set(uint32_t sw, int on)
+{
+    if (!sw12_sem)
+        return;
+
+    take_semaphore(sw12_sem, 0);
+
+    uint32_t cc = sw12_cc(on);
+    if (!cc)
+    {
+        /* not now; ML keeps what it holds, a later OFF tries again */
+    }
+    else if (on && sw == SW12_SW1)
+    {
+        int busy = sw12_held
+            || sw12_byte(cc, CC_SW1_BYTE) || sw12_byte(cc, CC_SW2_BYTE)
+            || ((MEM(cc + CC_SW_EVENTS_PEND) | MEM(cc + CC_SW_EVENTS_WORK)) & CC_SW_EVENT_MASK)
+            || MEM(CC_SELF_RELEASE_CB);
+        if (!busy) sw12_call(SW12_SW1, 1);
+    }
+    else if (on)
+    {
+        if (sw12_held != SW12_SW1)
+        {
+            /* SW2 only on top of ML's own SW1 */
+        }
+        else if (!sw12_bytes_ok(cc))
+        {
+            sw12_held = 0;              /* real button: the user has it */
+        }
+        else
+        {
+            sw12_call(SW12_SW2, 1);
+        }
+    }
+    else
+    {
+        if (sw12_held & SW12_SW2)
+        {
+            sw12_call(SW12_SW2, 0);     /* SW2(0), and SW1(0) lets go of SW2 first */
+        }
+        if (sw == SW12_SW1 && sw12_held == SW12_SW1)
+        {
+            if (sw12_bytes_ok(cc)) sw12_call(SW12_SW1, 0);
+            else sw12_held = 0;         /* real button: the user has it */
+        }
+    }
+
+    give_semaphore(sw12_sem);
+}
+#endif
 
 // half shutter
 void SW1(int v, int wait)
 {
     v = COERCE(v, 0, 1);
+#ifdef CONFIG_SW12_VIA_CC
+    sw12_set(SW12_SW1, v);
+#else
     prop_request_change_wait(PROP_REMOTE_SW1, &v, 0, 1000);
+#endif
     
     /* todo: remove the wait argument */
     if (wait) msleep(wait);
@@ -2381,7 +2524,11 @@ void SW1(int v, int wait)
 void SW2(int v, int wait)
 {
     v = COERCE(v, 0, 1);
+#ifdef CONFIG_SW12_VIA_CC
+    sw12_set(SW12_SW2, v);
+#else
     prop_request_change_wait(PROP_REMOTE_SW2, &v, 0, 1000);
+#endif
 
     /* todo: remove the wait argument */
     if (wait) msleep(wait);

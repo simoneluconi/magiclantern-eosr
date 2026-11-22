@@ -90,6 +90,14 @@
  * The R5 may well be the same; not checked. */
 #define CONFIG_EXPO_CODE768
 
+/** SW1() / SW2() call Canon's shutter switch callbacks CC_SW1_CBR /
+ * CC_SW2_CBR (stubs.S) instead of writing PROP_REMOTE_SW1 / SW2:
+ * CONFIG_PROP_REQUEST_CHANGE is off and prop_write_allow[] is empty, so the
+ * property path does nothing here. The callbacks are what Canon's MPU
+ * interrupt calls for the real button; andrewpoison took pictures with them
+ * (227138ec7). Guards and RAM words: src/lens.c, consts.h (CC_*). */
+#define CONFIG_SW12_VIA_CC
+
 /** Cam has the DryOS RPC mechanism between cores (_request_RPC, SGI 0xC) */
 #define CONFIG_RPC
 

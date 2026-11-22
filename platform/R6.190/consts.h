@@ -197,6 +197,24 @@
 /* WRONG! */
 #define HALFSHUTTER_PRESSED         0
 
+/* CONFIG_SW12_VIA_CC: Canon's shutter switch path, read only by ML.
+ * "cc" is Canon's CameraConductor object; CC_SW1_CBR / CC_SW2_CBR (stubs.S)
+ * write its switch bytes and post its switch events. From andrewpoison's
+ * port (227138ec7, r6_interval.h), rechecked in the 1.9.0 ROM. */
+#define CC_SW_CC_PTR        0x10AB8 // cc as the two callbacks read it, without a NULL check
+#define CC_SW_CC_PTR_POST   0x68C4  // cc as their event post reads it ([0x68C0+4], 0xE0287C2E)
+#define CC_SW_CC_PTR_WRAP   0x108D4 // cc as the switch wrapper reads it ([0x108D0+4], 0xE06D30AE)
+#define CC_SW_MGR_PTR       0x1E444 // MPU switch manager ([0x1E440+4]); [mgr] = callbacks, SW1 at +0, SW2 at +4
+#define CC_SW_HACK_QUEUE    0x1E43C // != 0: Canon diverts switch events into a queue (0xE0376E1E)
+#define CC_SELF_RELEASE_CB  0x108A8 // != 0: Canon's own self-release macro is running ([0x108A0+8], 0xE031DCF8)
+#define CC_EVENT_FLAG       0x008   // [cc+]: event flag of the post; 0 or odd = Canon asserts
+#define CC_SW_EVENTS_PEND   0x018   // [cc+]: class-2 events pending (the post ORs them in)
+#define CC_SW_EVENTS_WORK   0x050   // [cc+]: class-2 events being handled
+#define CC_SW_EVENT_MASK    0x3C00  // SW1 on 0x400, SW1 off 0x800, SW2 on 0x1000, SW2 off 0x2000
+#define CC_SW1_BYTE         0x0DF   // [cc+]: SW1 held; the SW1 callback stores its status here
+#define CC_SW2_BYTE         0x0E0   // [cc+]: SW2 held; the SW2 callback stores its status here
+#define CC_SW_GATE          0x2E0   // [cc+]: != 0: the switch wrapper drops switch events
+
 #define NUM_PICSTYLES 11 // R5, unverified
 
 #define AUDIO_MONITORING_HEADPHONES_CONNECTED 0
