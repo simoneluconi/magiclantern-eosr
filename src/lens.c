@@ -3086,6 +3086,13 @@ static LVINFO_UPDATE_FUNC(free_space_update)
     if (RECORDING)
     {
         /* leave space for the recording indicators */
+        #ifdef CONFIG_REC_INDICATOR_IN_TOP_BAR
+        /* Canon's own REC indicator is drawn where this item is, at the
+         * right end of the top bar: keep the item, blank, so that no
+         * other item moves there (transparent background, Canon's
+         * indicator stays visible) */
+        snprintf(buffer, sizeof(buffer), "%7s", "");
+        #endif
         return;
     }
 
@@ -3244,7 +3251,19 @@ static LVINFO_UPDATE_FUNC(iso_update)
             iso_equiv_raw = (lv_iso+3)/8*8;
             item->color_fg = COLOR_WHITE;
         }
-        
+
+        if (iso_equiv_raw == 0)
+        {
+            /* Auto ISO, and no FRAME_ISO to read the ISO in use: show
+             * Canon's auto ISO if it reports one, as in photo mode,
+             * else just "A" (it printed "A0") */
+            if (lens_info.raw_iso_auto)
+            {
+                STR_APPEND(buffer, "%d", raw2iso(lens_info.raw_iso_auto));
+            }
+            return;
+        }
+
         int iso = raw2iso(iso_equiv_raw);
         
         if (iso > 1600)

@@ -56,6 +56,11 @@
  * LiveView info bars showed photo items while recording. */
 #define CONFIG_NO_DEDICATED_MOVIE_MODE
 
+/** Canon's "REC" indicator is drawn at the top right of the screen, in
+ * ML's LiveView top bar (seen on camera, movie mode): keep that place
+ * free while recording (src/lens.c, free_space_update). */
+#define CONFIG_REC_INDICATOR_IN_TOP_BAR
+
 /** ML's LV image (get_yuv422_vram) is Canon's FaceYuv buffer, see
  * faceyuv.c: FACEYUV_WIDTH x FACEYUV_HEIGHT UYVY with signed chroma,
  * shown on ML's whole 720x480 area (src/vram.c, src/imgconv.h). */
