@@ -207,6 +207,8 @@ static struct menu_entry heat_timer_menu[] =
         .priv       = &heat_timer_factor,
         .min        = 1,
         .max        = HEAT_TIMER_MAX_FACTOR,
+        // indexed from .min; also used by the pick box
+        .choices    = CHOICES("Canon", "2x", "3x", "4x"),
         .select     = heat_timer_select,
         .update     = heat_timer_update,
         .help       = "Slow down Canon's time-based movie overheat timer.",
