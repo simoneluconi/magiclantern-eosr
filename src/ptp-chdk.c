@@ -14,6 +14,14 @@
 #include "property.h"
 #include "lens.h"
 
+/* PTP handlers run while the camera is in PC connection mode. fio_malloc
+ * uses MEM_TEMPORARY, which sends buffers >= 64 KiB to shoot_malloc, and
+ * on R6 1.9.0 holding shoot memory here gives ERR70 (128 KiB DownloadFile
+ * buffer, 200 KB GetMemory). Without MEM_TEMPORARY, buffers below
+ * shoot_malloc's preferred minimum (512 KiB) come from AllocateMemory. */
+#undef fio_malloc
+#define fio_malloc(len) __mem_malloc(len, MEM_DMA, __FILE__, __LINE__)
+
 /* if this is defined, any memory read will read processor cache. hacker's toolbox. keep fingers off. */
 //#define PTP_CACHE_ACCESS
 
@@ -595,7 +603,7 @@ PTP_HANDLER( PTP_OC_CHDK, 0 )
                 }
                 tmp = s;
                 t = s;
-                while ( (r = FIO_ReadFile(f, buf, (t<BUF_SIZE) ? t : BUF_SIZE)) > 0 )
+                while ( t > 0 && (r = FIO_ReadFile(f, buf, (t<BUF_SIZE) ? t : BUF_SIZE)) > 0 )
                 {
                     t -= r;
                     // cannot use send_ptp_data here
