@@ -870,7 +870,9 @@ static MENU_UPDATE_FUNC(heat_budget_display)
         MENU_SET_VALUE("n/a");
         return;
     }
-    MENU_SET_VALUE("%d%%", budget * 100 / 0xFFFF);
+    // raw value too: the drain is a few units per second, the percent
+    // needs minutes to move
+    MENU_SET_VALUE("%d%% (%d)", budget * 100 / 0xFFFF, budget);
     MENU_SET_RINFO("row %d", heat_mode_row);
 }
 #endif
@@ -1332,8 +1334,8 @@ static struct menu_entry debug_menus[] = {
                 .name = "Movie heat budget",
                 .update = heat_budget_display,
                 .icon_type = IT_ALWAYS_ON,
-                .help = "Budget left in Canon's time-based heat model.",
-                .help2 = "Row: Canon's table entry for the current mode.",
+                .help = "Budget left in Canon's time-based heat model (0..65535).",
+                .help2 = "Row: Canon's table row. Always 1 while this menu is open.",
             },
             MENU_EOL,
         },
