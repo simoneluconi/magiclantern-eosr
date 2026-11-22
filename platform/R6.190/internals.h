@@ -48,6 +48,14 @@
  * value (0xE04E8440). */
 #define CONFIG_RECORDING_FROM_SHOOTING_TYPE
 
+/** Does the mode *dial* have movie mode? R6 does not: photo / movie is a
+ * separate switch, as on 200D / 6D2. In movie mode PROP_SHOOTING_MODE_2
+ * keeps the dial's mode (e.g. 3 = M), never SHOOTMODE_MOVIE, and
+ * PROP_LV_MOVIE_SELECT is 2 (LVMS_ENABLE_MOVIE); andrewpoison saw the
+ * same on camera. Without this, is_movie_mode() was always 0: the
+ * LiveView info bars showed photo items while recording. */
+#define CONFIG_NO_DEDICATED_MOVIE_MODE
+
 /** ML's LV image (get_yuv422_vram) is Canon's FaceYuv buffer, see
  * faceyuv.c: FACEYUV_WIDTH x FACEYUV_HEIGHT UYVY with signed chroma,
  * shown on ML's whole 720x480 area (src/vram.c, src/imgconv.h). */
