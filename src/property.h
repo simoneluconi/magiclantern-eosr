@@ -218,6 +218,13 @@
 #define PROP_TEMP_TFT           0x80030081
 #define PROP_TEMP_SH            0x80030062
 #define PROP_TEMP_STATUS        0x8004000F  // Canon's overheat level, 0 = none
+
+// Movie heat timer ("RemainTimeDisplay", published by 0xE04E8B7E), 8 bytes.
+// Word 0: remaining recording time in seconds, rounded down to 5 minutes
+// (to 1 minute below 5 minutes). 65400 (0xFFFF rounded): no time limit in
+// this mode. 0xFFFF: initial value from TempSvc, not computed yet.
+// Word 1 is not set by 0xE04E8B7E (stack leftover), ignore it.
+#define PROP_HEAT_REMAIN_DISPLAY 0x800000D9
 #endif
 
 #ifdef CONFIG_5DC

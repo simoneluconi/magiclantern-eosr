@@ -817,6 +817,36 @@ static MENU_UPDATE_FUNC(temp_status_display)
             "Canon reports an overheat level. Let the camera cool down.");
     }
 }
+
+/* see PROP_HEAT_REMAIN_DISPLAY in property.h; only word 0 is valid */
+static volatile uint32_t heat_remain = 0xFFFF;
+
+PROP_HANDLER(PROP_HEAT_REMAIN_DISPLAY)
+{
+    if (len >= 4)
+    {
+        heat_remain = buf[0];
+    }
+}
+
+static MENU_UPDATE_FUNC(heat_remain_display)
+{
+    int remain = heat_remain;
+
+    if (remain == 0xFFFF)
+    {
+        MENU_SET_VALUE("n/a");
+    }
+    else if (remain == 65400)
+    {
+        MENU_SET_VALUE("no limit");
+    }
+    else
+    {
+        MENU_SET_VALUE("%d min", remain / 60);
+    }
+    MENU_SET_RINFO("%d s", remain);
+}
 #endif
 #endif
 
@@ -1264,6 +1294,13 @@ static struct menu_entry debug_menus[] = {
                 .icon_type = IT_ALWAYS_ON,
                 .help = "Canon's overheat level (PROP_TEMP_STATUS), 0 = none.",
                 .help2 = "3 and 4: Canon's GUI handles them as DISABLE_LV.",
+            },
+            {
+                .name = "Movie heat timer",
+                .update = heat_remain_display,
+                .icon_type = IT_ALWAYS_ON,
+                .help = "Canon's remaining movie time before overheat stop.",
+                .help2 = "Rounded down to 5 min (1 min below 5 min) by Canon.",
             },
             MENU_EOL,
         },
