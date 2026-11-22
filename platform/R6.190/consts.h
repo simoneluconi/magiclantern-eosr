@@ -211,16 +211,62 @@ extern int winsys_bmp_dirty_bit_neg;
 #define MVR_TIME_LIMIT_NORMAL_FPS 0xE074ED68
 #define MVR_TIME_LIMIT_HIGH_FPS   0xE074F168
 
-// Longest limit the MP4 writer can take. mp4wInitializeMmlibParam
+// The MP4 writer limits the clip length too. mp4wInitializeMmlibParam
 // (0xE05F07CA, run at each recording start) sizes the per-file sample
 // tables for 108000 entries (pool word 0xE05F0BE8; one entry per video
-// frame), and MmLibCompose asserts when one is full (0xE03E7120, ...).
+// frame), and MmLibCompose asserts when one is full (Err 70, 0xE03E7120).
 // The tables restart only at a new file, and on exFAT the R6 does not
-// split at 4 GB, so a clip longer than 108000 frames (30:01 at 59.94p,
-// 15:00 at 119.88p) would crash the camera and leave an unplayable file.
-// Until the tables are patched too, allow only Canon's limit or less.
-#define MVR_TIME_LIMIT_MAX_SEC    (30 * 60)
-// High Frame Rate (119.88p) fills them twice as fast (15:00), so never
+// split at 4 GB. On camera, with the capacity set to 1800, FHD 29.97p
+// stopped with Err 70 at about 60 s.
+//
+// MVR_WRITER_PATCHES (applied by movtweaks.c together with the time limit,
+// only when the limit is above Canon's, all or none):
+// {address, Canon's value, new value, is an instruction}
+// - capacity 108000 -> 216000 entries: 60:03 at 59.94p, 72:00 at 50p;
+// - the table sizes in bytes that go with it: 8-byte tables x2; AAC sizes
+//   4 x capacity (Canon's 345600 holds only 86400 of the 108000 it
+//   allows); composition offsets (ctts) 8 x capacity (Canon sized them for
+//   2/3 of the frames, the ratio measured on IPB clips; x2 would leave
+//   0.1 % at 60:00, 59.94p);
+// - the AAC chunk table (stsc) 0x8000 -> 0x10000 bytes, 4096 -> 8192
+//   entries (lsls r1,r2,#12 -> #13 at 0xE05F08D2). Canon does not check it:
+//   AAC adds about 2.1 per second (measured), so it overflowed silently
+//   from 32.7 min; now 65 min;
+// - the moov buffers (one per file set) 4 -> 8 MB, mov.w fp,#0x400000 at
+//   0xE05F02B0. The moov builder has no capacity check; measured on camera
+//   about 1176 B/s at 50p with AAC (moov 524260 B for 303 s), so a 60 min
+//   moov is about 4.3 MB at 50p and 4.9 MB at 59.94p. The third buffer
+//   (moov read back from an existing file, 0xE05F032C) stays 4 MB.
+//   Unpatched, a 4..8 MB header would take Canon's path for headers over
+//   4 MB (finalize, 0xE05EDAF0), which appends zeros in 1 MB steps; when the
+//   free box is shorter than its <= 511 B alignment pad, the header file
+//   gets up to 511 extra bytes (about 0.1-0.2 % of such clips, from the
+//   ROM). The two 4 MB compares (0xE03A38D6, 0xE05EDAF0) move to 8 MB, so
+//   a 4..8 MB header takes the same path as Canon's own headers.
+// Writer pool (MovRecResource, 193.5 MiB) peak on camera: 163.9 MiB with
+// the tables doubled, 173 MiB with all of these (4K 50p / 59.94p, HFR, FHD).
+// Tested on camera: a 60 min FHD 50p IPB Light (AAC) clip stopped at
+// 59:59 with a 4.46 MB moov and checked fine on a PC (ffprobe, ffmpeg).
+// Canon's player refuses it ("Cannot playback movie"): its moov buffer
+// is about 3 MB.
+// Pages: 0xE05F0000, 0xE03A0000, 0xE05E0000; with the time limit and the
+// heat timer, 5 remapped pages (CONFIG_MMU_RUNTIME_PAGES in internals.h).
+#define MVR_WRITER_PATCHES { \
+    { 0xE05F0BE4,     864000,    1728000, 0 }, /* 8-byte tables x2 */ \
+    { 0xE05F0BE8,     108000,     216000, 0 }, /* capacity x2 */ \
+    { 0xE05F0BEC,     345600,     864000, 0 }, /* AAC table: 4 x capacity */ \
+    { 0xE05F0BF0,     576000,    1728000, 0 }, /* ctts: 8 x capacity */ \
+    { 0xE05F08D0, 0x0311200D, 0x0351200D, 1 }, /* AAC stsc 4096 -> 8192 */ \
+    { 0xE05F02B0, 0x0B80F44F, 0x0B00F44F, 1 }, /* moov buffers 4 -> 8 MB */ \
+    { 0xE05F032C, 0xF5B14659, 0xF5B104D1, 1 }, /* 3rd buffer: 8 << 19 = 4 MB */ \
+    { 0xE03A38D8, 0xD2030F80, 0xD2030F00, 1 }, /* cmp 4 -> 8 MB */ \
+    { 0xE05EDAF0, 0x0F80F5B0, 0x0F00F5B0, 1 }, /* cmp 4 -> 8 MB */ \
+}
+
+// Longest limit, given MVR_WRITER_PATCHES: 216000 frames last 60:03 at
+// 59.94p.
+#define MVR_TIME_LIMIT_MAX_SEC    (60 * 60)
+// High Frame Rate (119.88p) fills the tables twice as fast, so never
 // lengthen it past Canon's 7:29; shorter limits still apply.
 #define MVR_TIME_LIMIT_MAX_HFR_SEC (7 * 60 + 29)
 

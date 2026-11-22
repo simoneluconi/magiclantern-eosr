@@ -907,7 +907,13 @@ static MENU_UPDATE_FUNC(print_mov_time_limit)
     }
     else
     {
+        #ifdef MVR_WRITER_PATCHES
+        /* the writer is patched too, up to MVR_TIME_LIMIT_MAX_SEC */
+        if (mov_time_limit > 30 * 60)
+            MENU_SET_WARNING(MENU_WARN_ADVICE, "Longer clips: the camera may not play them back; use a PC.");
+        #else
         MENU_SET_WARNING(MENU_WARN_ADVICE, "Too long recording makes empty files on ExFAT, ok on FAT32");
+        #endif
     }
 }
 
@@ -984,7 +990,15 @@ static void change_mov_time_limit(void* priv, int delta)
     if (mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit > MVR_TIME_LIMIT_MAX_HFR_SEC)
         hfr_limit_ms = MVR_TIME_LIMIT_MAX_HFR_SEC * 1000;
 #endif
-    struct patch patches[2] = {
+#ifdef MVR_WRITER_PATCHES
+    // the movie writer's own limits (see consts.h), needed above Canon's limit
+    static const struct { uint32_t addr, old_value, new_value, is_instruction; }
+        writer_patches[] = MVR_WRITER_PATCHES;
+    #define N_WRITER_PATCHES COUNT(writer_patches)
+#else
+    #define N_WRITER_PATCHES 0
+#endif
+    struct patch patches[2 + N_WRITER_PATCHES] = {
         {
             .addr = (uint8_t *)MVR_TIME_LIMIT_NORMAL_FPS,
             .old_value = 0x1b7358, // 29m59s
@@ -1000,6 +1014,26 @@ static void change_mov_time_limit(void* priv, int delta)
             .description = "MOV time limit, high FPS"
         }
     };
+    int n_patches = 2;
+#ifdef MVR_WRITER_PATCHES
+    // only above Canon's limit: shorter limits leave the writer as it is
+    int writer = mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit > 30 * 60;
+    for (int i = 0; i < N_WRITER_PATCHES; i++)
+    {
+        patches[2 + i] = (struct patch) {
+            .addr = (uint8_t *)writer_patches[i].addr,
+            .old_value = writer_patches[i].old_value,
+            .new_value = writer_patches[i].new_value,
+            .size = 4,
+            .is_instruction = writer_patches[i].is_instruction,
+            .description = "MOV time limit: movie writer",
+        };
+        unpatch_memory(writer_patches[i].addr);
+    }
+    if (writer)
+        n_patches += N_WRITER_PATCHES;
+#endif
+    #undef N_WRITER_PATCHES
     unpatch_memory((uint32_t)patches[0].addr);
     unpatch_memory((uint32_t)patches[1].addr);
     if (mov_time_limit == 30 * 60)
@@ -1007,10 +1041,12 @@ static void change_mov_time_limit(void* priv, int delta)
         return;
     }
 
-    // apply_patches() checks the old values, applies both or neither,
+    // apply_patches() checks the old values, applies all or none,
     // and logs the reason to the console on failure. Fall back to
     // Canon's limit so the menu shows what is really in effect.
-    int err = apply_patches(patches, 2);
+    // The writer patches take effect at the next recording start
+    // (change_mov_time_limit is not called while recording).
+    int err = apply_patches(patches, n_patches);
     if (err)
     {
         mov_time_limit = 30 * 60;
