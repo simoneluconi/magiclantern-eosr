@@ -1973,7 +1973,14 @@ PROP_HANDLER( PROP_LENS_DYNAMIC_DATA )
 
     // PROP_LENS_DYNAMIC_DATA provides focus near and focus far values.
     // We compute focus dist using harmonic mean ( 2*Dn*Df / (Dn + Df) )
-    lens_info.focus_dist       = (2*_dynamic->focus_near*_dynamic->focus_far) / (_dynamic->focus_near + _dynamic->focus_far);
+    // in 64 bits (the product overflows int), and without dividing by zero
+    // when the lens reports neither (no focus distance).
+    const unsigned near = _dynamic->focus_near;
+    const unsigned far  = _dynamic->focus_far;
+    if (near + far == 0)
+        lens_info.focus_dist   = 0;
+    else
+        lens_info.focus_dist   = (2ull * near * far) / (near + far);
 
     // We can get this data for free, do we need to compute it in our code?
     //lens_info.dof_near         = _dynamic->focus_near * 10;
