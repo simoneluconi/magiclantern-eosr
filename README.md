@@ -39,6 +39,7 @@ this fork is only maintained and tested for the R6.
 | **Clip length up to 59:59** instead of 29:59 (Canon's movie writer and player are patched too) | Movie > MOV/MP4 time limit | works, a 60 min clip records and plays back on the camera |
 | **Heat timer** 2x / 3x / 4x: slows Canon's time-based 4K heat limit; the temperature sensors still protect the camera | Movie > Heat timer | works |
 | Temperatures, heat timer and budget, in °C or °F | Debug > Internal Temp, LiveView top bar | works |
+| Battery charge in % | LiveView bottom bar, Debug > Battery level | works |
 | Spotmeter, false color, waveform, vectorscope | Overlay | works in photo mode |
 | Modules: **Lua scripts** and the file manager | Modules, Scripts, Debug > File Manager | works (example scripts tested) |
 | Red display for night / astro, ML colour schemes incl. "Pure Red" | Display | works |

@@ -42,7 +42,7 @@ Only features the R6 does not have already are enabled. Every new option starts 
 
 - **Debug > Internal Temp** lists the temperature sensors, Canon's overheat status, the movie heat timer (minutes left) and the heat budget.
 - With **Overlay > Global Draw** on and Canon's **clean INFO screen**, ML's top bar shows the temperature, and in movie mode the heat timer and budget. These are hidden in Full HD, where Canon has no heat timer. In movie mode the right end of the top bar is always left free for Canon's REC indicator. If the bar is full, the clock is hidden first.
-- The battery icon at the right of the bottom bar follows Canon's levels: full and 3 bars in white, half and a quarter in yellow, low and empty in red.
+- The battery icon at the right of the bottom bar shows the exact charge in %, as in Canon's Battery info menu, updated every 10 seconds. Its colour follows Canon's levels: full and 3 bars in white, half and a quarter in yellow, low and empty in red. **Debug > Battery level** also estimates the time left; the estimate is reliable once the charge has dropped by a couple of percent.
 - After a mode change (photo/movie, mode dial), ML waits 3 seconds while Canon shows its own info.
 
 ### Overlays (photo mode)
