@@ -35,6 +35,7 @@ this fork is only maintained and tested for the R6.
 | Feature | Where | State |
 |---|---|---|
 | Loading ML from the card (slot 1 or 2, FAT32 or exFAT), ML menu, saving settings | Trash button opens the menu | works |
+| ML menu while recording; the dials only move the menu, not the exposure | Trash button while recording | works |
 | **Clip length up to 59:59** instead of 29:59 (Canon's movie writer and player are patched too) | Movie > MOV/MP4 time limit | works, a 60 min clip records and plays back on the camera |
 | **Heat timer** 2x / 3x / 4x: slows Canon's time-based 4K heat limit; the temperature sensors still protect the camera | Movie > Heat timer | works |
 | Temperatures, heat timer and budget, in °C or °F | Debug > Internal Temp, LiveView top bar | works |
@@ -49,7 +50,6 @@ this fork is only maintained and tested for the R6.
 ## What does not work (yet)
 
 - **Overlays in movie mode**: spotmeter, false color, waveform and vectorscope only draw in photo LiveView.
-- **ML menu while recording**: it closes again right away (Canon's menu can't be opened under it while recording).
 - **Trimming long clips on the camera**: clips over 30 minutes play back on the camera, but Canon's movie editor keeps its own limits.
 - **Other modules** (dual ISO, MLV / RAW video, silent pictures...) are not included: they need parts of ML that don't exist yet on DIGIC X.
 - **Lua scripts that change camera settings** (exposure, shooting) fail: the R6 build does not allow property writes.

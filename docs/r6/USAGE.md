@@ -14,7 +14,7 @@ Back to [README](../../README.md).
 
 Trash and the joystick centre were confirmed on the camera. The other rows follow the usual ML conventions and the R6 button map in the code. If something behaves differently, please report it.
 
-The ML menu draws on top of Canon's own screens. It does not open while a movie is recording; use the LiveView top bar for live information instead.
+The ML menu draws on top of Canon's own screens. It also opens while a movie is recording. While the menu is open, the dials and the lens control ring only move the ML menu; they don't change exposure. When the menu closes, Canon redraws its screen, including the REC indicator.
 
 In SET's pick lists and edit mode the other menu items are hidden until you press SET again. Change the value with the rear dial or the joystick.
 
@@ -41,7 +41,8 @@ Only features the R6 does not have already are enabled. Every new option starts 
 ### Temperatures and the LiveView top bar
 
 - **Debug > Internal Temp** lists the temperature sensors, Canon's overheat status, the movie heat timer (minutes left) and the heat budget.
-- With **Overlay > Global Draw** on and Canon's **clean INFO screen**, ML's top bar shows the temperature, and in movie mode the heat timer and budget. These are hidden in Full HD, where Canon has no heat timer. While recording, the right end is left free for Canon's REC indicator.
+- With **Overlay > Global Draw** on and Canon's **clean INFO screen**, ML's top bar shows the temperature, and in movie mode the heat timer and budget. These are hidden in Full HD, where Canon has no heat timer. In movie mode the right end of the top bar is always left free for Canon's REC indicator. If the bar is full, the clock is hidden first.
+- The battery icon at the right of the bottom bar follows Canon's levels: full and 3 bars in white, half and a quarter in yellow, low and empty in red.
 - After a mode change (photo/movie, mode dial), ML waits 3 seconds while Canon shows its own info.
 
 ### Overlays (photo mode)
