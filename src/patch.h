@@ -123,6 +123,13 @@ int convert_f_patch_to_patch(struct function_hook_patch *f_patch_in,
     #define MAX_FUNCTION_HOOKS 32
 #endif
 
+// A cam can ask for room for more patches (up to 64, see the Debug menu
+// in patch.c); each costs sizeof(struct patch) in patches_global.
+#ifdef CONFIG_MAX_PATCHES
+    #undef MAX_PATCHES
+    #define MAX_PATCHES CONFIG_MAX_PATCHES
+#endif
+
 extern int num_patches;
 extern struct patch patches_global[MAX_PATCHES];
 
