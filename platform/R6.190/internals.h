@@ -127,7 +127,8 @@
 /** Remapped 64 KiB pages for ROM patches: one reserved at boot, six more
  * taken from Canon's AllocateMemory pool after boot (src/patch_mmu.c).
  * In use: time limit 0xE074, movie writer 0xE05F / 0xE03A / 0xE05E, player
- * 0xE04E, heat timer 0xE0D9; one spare.
+ * 0xE04E, heat timer 0xE0D9, dial hook 0xE02E (mmu_patches.h, applied
+ * first, so it takes the boot page); none spare.
  * The boot space comes out of DryOS user_mem, only 1.07 MB on R6
  * (0x190098 + 0x112D70, cstart 0xE0100146), which must keep 0x80010 bytes
  * (cstart 0xE0100120; init_task and boot-d678.c check it): with two pages
