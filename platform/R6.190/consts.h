@@ -171,10 +171,14 @@
 
 /*
  * LvInfoToggle_Update 0xE08C1B90 ("LvInfoToggle_Update ToggleIndex:%d -> %d").
- * WARNING: R6 has 9 states (0..8) and no "TURNOFF" string; the R5 meaning of
- * the values (3 = clean overlays) is not confirmed for R6.
+ * R6 has 9 states (0..8) and no "TURNOFF" string. Seen on camera: on the
+ * LCD 3 is the clean INFO screen, as on R5; the EVF has its own INFO cycle
+ * here, 0 nothing over the image (exposure in the strip below it),
+ * 1 minimal info, 2 full info.
  */
 #define LV_OVERLAYS_MODE MEM(0x20F70)
+extern int lv_display_is_evf(void);     /* faceyuv.c: the EVF alone is on */
+#define LV_OVERLAYS_MODE_CLEAN (lv_display_is_evf() ? 0 : 3)
 
 /* Beeps (CONFIG_BEEP_SE, src/beep.c). "Speaker Volume" 1..5 scales the
  * samples. SE_BEEP_OBJ: pointer to Canon's sound-effect object, set by

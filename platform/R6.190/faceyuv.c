@@ -258,6 +258,19 @@ static const struct fy_layout * fy_find_layout(uint32_t out, uint32_t size)
     return NULL;
 }
 
+/* display outputs, or 0 if not known yet */
+static uint32_t disp_outputs(void)
+{
+    uint32_t dev = RD(DISP_DEV_PTR);
+    return ram_ok(dev, 0x1C) ? RD(dev + 0x18) : 0;
+}
+
+/* LV_OVERLAYS_MODE_CLEAN (consts.h): the EVF has its own INFO screens */
+int lv_display_is_evf(void)
+{
+    return disp_outputs() == DISP_EVF;
+}
+
 void faceyuv_lv_geometry(int * width, int * height, int * y0, int * off_169)
 {
     const struct fy_layout * l = fy_layout;
@@ -279,9 +292,7 @@ void * faceyuv_lv_buffer(void)
     }
 
     /* LCD or EVF alone; not HDMI (other geometry) */
-    uint32_t dev = RD(DISP_DEV_PTR);
-    if (!ram_ok(dev, 0x1C)) return NULL;
-    uint32_t outputs = RD(dev + 0x18);
+    uint32_t outputs = disp_outputs();
     if (outputs != DISP_LCD && outputs != DISP_EVF) return NULL;
 
     /* photo (3:2) or movie (16:9) image, on a screen layout we know */
