@@ -131,9 +131,14 @@ extern int SE_BeepStop(int channel);        /* 0 generator, 1 PCM */
 extern int SE_PlayPWMWait(int keep);
 
 /* PCM channel state: 0 requested, 1 playing, 2 stopping, 3 idle */
+static int se_pcm_state()
+{
+    return MEM(MEM(SE_BEEP_OBJ) + 0x48);
+}
+
 static int se_pcm_idle()
 {
-    return MEM(MEM(SE_BEEP_OBJ) + 0x48) == 3;
+    return se_pcm_state() == 3;
 }
 
 static void asif_stop_cbr()
@@ -167,11 +172,21 @@ static void play_beep_ex(int16_t* buf, int N, int sample_rate)
     SE_PlayPWMWait(1);
     SE_BeepStart(0, &req);
 
-    int timeout = N * 1000 / sample_rate + 1000;  /* ms */
-    while (!se_pcm_idle() && timeout > 0)
+    /* Canon's sound task may start it late, e.g. while a screenshot
+     * converts the screen (seen on camera: a 1 s timeout from the request
+     * stopped the screenshot beep before it played). Wait for it to start
+     * (or to be refused), then for its end; stop it only if it plays
+     * longer than it should. */
+    int t0 = get_ms_clock();
+    while (se_pcm_state() == 0 && get_ms_clock() - t0 < 3000)
     {
         msleep(20);
-        timeout -= 20;
+    }
+    int duration_ms = N * 1000 / sample_rate + 500;
+    t0 = get_ms_clock();
+    while (!se_pcm_idle() && get_ms_clock() - t0 < duration_ms)
+    {
+        msleep(20);
     }
     if (!se_pcm_idle())
     {
