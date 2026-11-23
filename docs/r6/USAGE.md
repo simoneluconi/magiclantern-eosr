@@ -45,9 +45,9 @@ Only features the R6 does not have already are enabled. Every new option starts 
 - The battery icon at the right of the bottom bar shows the exact charge in %, as in Canon's Battery info menu, updated every 10 seconds. Its colour follows Canon's levels: full and 3 bars in white, half and a quarter in yellow, low and empty in red. **Debug > Battery level** also estimates the time left; the estimate is reliable once the charge has dropped by a couple of percent.
 - After a mode change (photo/movie, mode dial), ML waits 3 seconds while Canon shows its own info.
 
-### Overlays (photo mode)
+### Overlays
 
-**Spotmeter**, **False color**, **Waveform** and **Vectorscope** in the Overlay menu. They need Global Draw and Canon's clean INFO screen. They work in photo LiveView, but not yet in movie mode.
+**Spotmeter**, **False color**, **Waveform** and **Vectorscope** in the Overlay menu. They need Global Draw and Canon's clean INFO screen. They work in photo and movie mode, also while recording. In movie mode they cover the 16:9 image, and ML's bars sit in the black bands above and below it. For about 2 seconds after a photo/movie change they are not drawn. They don't draw under ML's own graphics (bars, the spotmeter box). Not shown in the viewfinder yet.
 
 ### Modules: Lua scripts and the file manager
 
@@ -79,7 +79,7 @@ Only features the R6 does not have already are enabled. Every new option starts 
 ### Debug > Screenshot
 
 - Choose it, close the menu and wait for the countdown and the beep. A 720x480 `VRAMn.BMP` is saved in the card root.
-- It contains ML's graphics (menu, bars, overlays) and, in photo LiveView, the LiveView image at ML's lower resolution.
+- It contains ML's graphics (menu, bars, overlays) and, in LiveView, the LiveView image at ML's lower resolution (in movie mode the 16:9 image, with black bands).
 - Canon's own graphics are not in the file.
 
 ## Settings

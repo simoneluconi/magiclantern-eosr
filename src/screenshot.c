@@ -387,7 +387,9 @@ int take_screenshot( char* filename, uint32_t mode )
             uint32_t uyvy = 0;
             if (A == 0x00) // ML pixel transparent, consider drawing Canon pixel
             {
-                if (save_yuv)
+                // the LV image may cover only part of ML's LV area
+                // (CONFIG_FACEYUV_LV, movie mode: the 16:9 band); black outside
+                if (save_yuv && BM2LV_Y(y) >= 0 && BM2LV_Y(y) < vram_lv.height)
                 {
                     uyvy = yuv422_get_pixel(yuv_copy, BM2LV(x,y)/2);
                 }

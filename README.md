@@ -41,17 +41,16 @@ this fork is only maintained and tested for the R6.
 | Temperatures, heat timer and budget, in °C or °F | Debug > Internal Temp, LiveView top bar | works |
 | Battery charge in % | LiveView bottom bar, Debug > Battery level | works |
 | ML beeps with ML's own tone (pitch, waveform, volume), unlike Canon's beeps | Audio > Beep, test tones | works |
-| Spotmeter, false color, waveform, vectorscope | Overlay | works in photo mode |
+| Spotmeter, false color, waveform, vectorscope | Overlay | works in photo and movie mode, also while recording (rear screen) |
 | Modules: **Lua scripts** and the file manager | Modules, Scripts, Debug > File Manager | works (example scripts tested) |
 | Red display for night / astro, ML colour schemes incl. "Pure Red" | Display | works |
 | Motion detect (pictures through Canon's own shutter path) | Shoot > Motion Detect | works |
 | Lens info, depth of field, auto exposure values | Focus, Expo | works |
-| Screenshots of ML's graphics and the LiveView image (photo mode) | Debug > Screenshot | works |
+| Screenshots of ML's graphics and the LiveView image | Debug > Screenshot | works |
 | File transfer over USB (PTP), on builds compiled with PTP | see [USB-PTP](docs/r6/USB-PTP.md) | works, advanced |
 
 ## What does not work (yet)
 
-- **Overlays in movie mode**: spotmeter, false color, waveform and vectorscope only draw in photo LiveView.
 - **Trimming long clips on the camera**: clips over 30 minutes play back on the camera, but Canon's movie editor keeps its own limits.
 - **Other modules** (dual ISO, MLV / RAW video, silent pictures...) are not included: they need parts of ML that don't exist yet on DIGIC X.
 - **Lua scripts that change camera settings** (exposure, shooting) fail: the R6 build does not allow property writes.
