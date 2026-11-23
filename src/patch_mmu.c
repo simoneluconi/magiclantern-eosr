@@ -26,9 +26,10 @@
 
 // CONFIG_MMU_RUNTIME_PAGES: this many more 64kB pages for patches, taken
 // from Canon's AllocateMemory pool once DryOS is up (mmu_runtime_pages_init),
-// instead of from the memory reserved at boot. The boot space then only
-// needs their L2 tables (one per page, at most). Early patches can't use
-// them. For cams where the boot space comes out of a small user_mem.
+// instead of from the memory reserved at boot. Their L2 tables come from the
+// same allocation; the boot space only holds the small mmu_L2_page_info
+// structs for them. Early patches can't use them. For cams where the boot
+// space comes out of a small user_mem.
 #ifdef CONFIG_MMU_RUNTIME_PAGES
 #define MMU_RUNTIME_PAGES CONFIG_MMU_RUNTIME_PAGES
 #else
@@ -54,6 +55,8 @@
 //   0x300 padding
 //   0x400 per L2 table (0x400 aligned) // need one per 1MB region containing remaps
 // sizeof(struct mmu_L2_page_info) per L2 table
+// sizeof(struct mmu_L2_page_info) per runtime L2 table (the table itself is
+//   allocated with the runtime pages)
 //
 // A cam can set CONFIG_MMU_REMAP_PAGES in internals.h when its patches
 // touch more than one 64kB page.  Each page costs about 65kB of RAM.
@@ -66,8 +69,7 @@
 static uint8_t generic_mmu_space[CONFIG_MMU_REMAP_PAGES * (MMU_PAGE_SIZE
                                                            + MMU_L2_TABLE_SIZE
                                                            + sizeof(struct mmu_L2_page_info))
-                                 + MMU_RUNTIME_L2_TABLES * (MMU_L2_TABLE_SIZE
-                                                            + sizeof(struct mmu_L2_page_info))
+                                 + MMU_RUNTIME_L2_TABLES * sizeof(struct mmu_L2_page_info)
                                  + MMU_L1_TABLE_SIZE + 0x300]
                __attribute__((aligned(0x10000)));
 #endif
@@ -176,7 +178,11 @@ static struct mmu_L2_page_info *find_L2_for_patch(struct patch *patch,
             else
                 return NULL;
         }
-        else if (l2_page->in_use == 0)
+        else if (l2_page->in_use == 0
+#if MMU_RUNTIME_L2_TABLES > 0
+                 && l2_page->L2_table != NULL // runtime table not allocated (yet)
+#endif
+                )
         {
             unused_page = l2_page;
         }
@@ -395,8 +401,10 @@ static int calc_mmu_globals(uint32_t start_addr, uint32_t size)
     while(!reqs_met && num_64k_pages > 0)
     {
         global_mmu_conf.max_64k_pages_remapped = num_64k_pages;
-        // one L2 table per boot page, plus the runtime pages' tables
+        // one L2 table per boot page here, plus info structs for the
+        // runtime tables, which are allocated with the runtime pages
         uint32_t n_L2 = num_64k_pages + MMU_RUNTIME_L2_TABLES;
+        uint32_t n_L2_here = num_64k_pages;
         global_mmu_conf.max_L2_tables = n_L2;
         if (fill_forwards)
         {
@@ -408,7 +416,7 @@ static int calc_mmu_globals(uint32_t start_addr, uint32_t size)
             // pad to align on 0x400 for L2 tables
             L2_tables = (uint8_t *)ROUND_UP(L1_table_end, MMU_L2_TABLE_SIZE);
             uint32_t L2_tables_end = (uint32_t)L2_tables
-                                        + MMU_L2_TABLE_SIZE * n_L2;
+                                        + MMU_L2_TABLE_SIZE * n_L2_here;
 
             // need space for L2 info structs.  These are small
             // and may fit in the padding gap
@@ -442,7 +450,7 @@ static int calc_mmu_globals(uint32_t start_addr, uint32_t size)
             global_mmu_conf.phys_mem_pages = (uint8_t *)phys_mem_start;
 
             // L2 tables align well with the start of the 64k pages
-            L2_tables = (uint8_t *)(phys_mem_start - MMU_L2_TABLE_SIZE * n_L2);
+            L2_tables = (uint8_t *)(phys_mem_start - MMU_L2_TABLE_SIZE * n_L2_here);
             if ((uint32_t)L2_tables < start_addr)
                 goto cont;
 
@@ -495,6 +503,12 @@ static int calc_mmu_globals(uint32_t start_addr, uint32_t size)
         {
             global_mmu_conf.L2_tables[i].phys_mem[j] = NULL;
         }
+#if MMU_RUNTIME_L2_TABLES > 0
+        // runtime tables are NULL until mmu_runtime_pages_init() allocates them
+        if (i >= global_mmu_conf.max_64k_pages_remapped)
+            global_mmu_conf.L2_tables[i].L2_table = NULL;
+        else
+#endif
         global_mmu_conf.L2_tables[i].L2_table = (L2_tables + (i * MMU_L2_TABLE_SIZE));
         global_mmu_conf.L2_tables[i].virt_page_mapped = 0x0;
         global_mmu_conf.L2_tables[i].in_use = 0x0;
@@ -595,18 +609,25 @@ static void mmu_runtime_pages_init(void *unused)
     if (!mmu_globals_initialised)
         return;
 
-    // one page more, so the start can be 64kB aligned
-    void *mem = _AllocateMemory((MMU_RUNTIME_PAGES + 1) * MMU_PAGE_SIZE);
+    // one page more, so the start can be 64kB aligned;
+    // the L2 tables follow the pages (0x400 aligned, as pages are 64kB)
+    void *mem = _AllocateMemory((MMU_RUNTIME_PAGES + 1) * MMU_PAGE_SIZE
+                                + MMU_RUNTIME_L2_TABLES * MMU_L2_TABLE_SIZE);
     if (mem == NULL)
     {
         qprintf("MMU runtime pages: AllocateMemory failed\n");
         return;
     }
-    // the cached alias is the physical address the L2 entries point to
+    // the cached alias is the physical address the L1/L2 entries point to
     uint32_t base = ROUND_UP((uint32_t)CACHEABLE(mem), MMU_PAGE_SIZE);
+    uint8_t *tables = (uint8_t *)(base + MMU_RUNTIME_PAGES * MMU_PAGE_SIZE);
+    uint32_t first = global_mmu_conf.max_64k_pages_remapped;
+    for (uint32_t i = 0; i < MMU_RUNTIME_L2_TABLES; i++)
+        global_mmu_conf.L2_tables[first + i].L2_table = tables + i * MMU_L2_TABLE_SIZE;
     global_mmu_conf.runtime_mem_pages = (uint8_t *)base;
     global_mmu_conf.runtime_64k_pages = MMU_RUNTIME_PAGES;
-    qprintf("MMU runtime pages: %d at 0x%x\n", MMU_RUNTIME_PAGES, base);
+    qprintf("MMU runtime pages: %d at 0x%x, %d L2 tables at 0x%x\n",
+            MMU_RUNTIME_PAGES, base, MMU_RUNTIME_L2_TABLES, tables);
 }
 INIT_FUNC("mmu_runtime_pages", mmu_runtime_pages_init);
 #endif
