@@ -40,6 +40,7 @@ this fork is only maintained and tested for the R6.
 | **Heat timer** 2x / 3x / 4x: slows Canon's time-based 4K heat limit; the temperature sensors still protect the camera | Movie > Heat timer | works |
 | Temperatures, heat timer and budget, in °C or °F | Debug > Internal Temp, LiveView top bar | works |
 | Battery charge in % | LiveView bottom bar, Debug > Battery level | works |
+| ML beeps with ML's own tone (pitch, waveform, volume), unlike Canon's beeps | Audio > Beep, test tones | works |
 | Spotmeter, false color, waveform, vectorscope | Overlay | works in photo mode |
 | Modules: **Lua scripts** and the file manager | Modules, Scripts, Debug > File Manager | works (example scripts tested) |
 | Red display for night / astro, ML colour schemes incl. "Pure Red" | Display | works |
@@ -54,7 +55,6 @@ this fork is only maintained and tested for the R6.
 - **Trimming long clips on the camera**: clips over 30 minutes play back on the camera, but Canon's movie editor keeps its own limits.
 - **Other modules** (dual ISO, MLV / RAW video, silent pictures...) are not included: they need parts of ML that don't exist yet on DIGIC X.
 - **Lua scripts that change camera settings** (exposure, shooting) fail: the R6 build does not allow property writes.
-- **Beeps**: ML's sounds are not played on the R6.
 - ML overlays are not shown in the viewfinder.
 - Zebras, focus peaking, histogram, intervalometer and bulb timer are **not enabled on purpose**: the R6 has its own.
 

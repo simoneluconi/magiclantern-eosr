@@ -70,6 +70,12 @@ Only features the R6 does not have already are enabled. Every new option starts 
 - Works in photo LiveView. It uses Canon's own shutter path, so pictures and shutdown behave normally.
 - Opening the ML menu stops detection.
 
+### Audio > Beep, test tones
+
+- ML's beeps (screenshot, motion detect, Lua scripts...) use ML's own tone, so they sound different from Canon's AF and self-timer beeps.
+- **Tone Frequency**, **Tone Waveform** and **Speaker Volume** change the sound. **Play test tone** plays it for 5 seconds.
+- **Enable Beeps** turns ML's beeps off; the LED blinks instead. ML never beeps while a movie is recording.
+
 ### Debug > Screenshot
 
 - Choose it, close the menu and wait for the countdown and the beep. A 720x480 `VRAMn.BMP` is saved in the card root.
