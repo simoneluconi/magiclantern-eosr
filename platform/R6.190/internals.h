@@ -66,6 +66,12 @@
  * empty in movie mode (src/lens.c, rec_indicator_space_update). */
 #define CONFIG_REC_INDICATOR_IN_TOP_BAR
 
+/** ML draws into Canon's GUI layer, and Canon repaints only what changes:
+ * while recording (no Canon dialog under the ML menu) "REC" stayed missing
+ * after the ML menu closed (seen on camera). Ask Canon's GUI task to
+ * repaint the screen then (src/bmp.c, canon_gui_repaint; stubs.S). */
+#define CONFIG_CANON_GUI_REPAINT
+
 /** PROP_BATTERY_POWER holds Canon's CCAPI battery levels, not 0/1/2 bars:
  * 0 low, 1 half, 2 full, 3 none, 4 high, 5 quarter, 6 error, 7 invalid,
  * 8..10 charging (names: CCAPI enum table at 0xE1C914AC; icon order from

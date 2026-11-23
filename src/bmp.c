@@ -235,6 +235,26 @@ void bmp_idle_copy(int direction, int fullsize)
 // but this struct is not yet determined for 200D
 extern int XimrExe(void *);
 extern struct semaphore *winsys_sem;
+
+#ifdef CONFIG_CANON_GUI_REPAINT
+/* set from canon_gui_repaint() until Canon has repainted its GUI layer:
+ * ML doesn't write to that layer meanwhile (see refresh_yuv_from_rgb) */
+static volatile int canon_gui_repaint_pending = 0;
+static volatile int canon_gui_repaint_since = 0;
+
+/* 1 while ML must not write to Canon's layer; gives up after 1 s, in case
+ * Canon's callback never runs (ML's graphics would stay frozen) */
+static int canon_gui_repaint_blocks_refresh(void)
+{
+    if (!canon_gui_repaint_pending)
+        return 0;
+    if (get_ms_clock() - canon_gui_repaint_since < 1000)
+        return 1;
+    canon_gui_repaint_pending = 0;
+    return 0;
+}
+#endif
+
 void refresh_yuv_from_rgb(void)
 {
     // get our indexed buffer, convert into our real rgb buffer
@@ -271,6 +291,19 @@ void refresh_yuv_from_rgb(void)
         // I think this could be used as general solution?
         // Shall we use per-camera constants in bmp.c? Or maybe get this at runtime
         // from Ximr / XCM?
+        //
+        // Under bmp_lock, as clrscr(): a pass that is half-way through must
+        // not put back pixels that clrscr() has just erased, and
+        // canon_gui_repaint() must not start while ML writes to the layer.
+        AcquireRecursiveLock(bmp_lock, 0);
+        #ifdef CONFIG_CANON_GUI_REPAINT
+        if (canon_gui_repaint_blocks_refresh())
+        {
+            ReleaseRecursiveLock(bmp_lock);
+            ml_refresh_display_needed = 1;
+            return;
+        }
+        #endif
         uint32_t *rgb_row = rgb_data;
         uint32_t n = 0;     /* pixel index in bmp_vram_indexed */
         for (uint y = 0; y < BMP_H_PLUS - BMP_H_MINUS; y++ )
@@ -299,6 +332,7 @@ void refresh_yuv_from_rgb(void)
             }
             rgb_row = rgb_row + BMP_LAYER_WIDTH;
         }
+        ReleaseRecursiveLock(bmp_lock);
 #else
         //SJE FIXME benchmark this loop, it probably wants optimising
         for (size_t n = 0; n < BMP_VRAM_SIZE; n++)
@@ -391,6 +425,73 @@ void refresh_yuv_from_rgb_task(void *unused)
         msleep(50); // max 20 fps refresh
     }
 }
+
+#ifdef CONFIG_CANON_GUI_REPAINT
+/* Canon's GUI task (CtrlSrv) paints its windows into the layer we draw
+ * into, and only repaints what changed. Static items under ML's graphics
+ * (e.g. "REC" under the ML menu while recording, with no Canon dialog
+ * under it) don't come back by themselves after clrscr().
+ *
+ * canon_gui_repaint() asks CtrlSrv, through its own timer service, to
+ * repaint the whole screen with the call pair Canon ends
+ * UpdateLiveViewDialog with. The order:
+ * 1. the caller has erased ML's pixels (clrscr); ML writes nothing more
+ *    to the layer until 3 (canon_gui_repaint_blocks_refresh);
+ * 2. in CtrlSrv, with no ML refresh half-way (bmp_lock) and Canon idle
+ *    (no batch, no deferred or disabled refresh), Canon repaints and
+ *    copies to VRAM; this returns when its pixels are final;
+ * 3. ML's next refresh draws its own graphics again; it takes winsys_sem
+ *    before XimrExe, so it waits for Canon's transfer.
+ * Canon never takes bmp_lock; lock order is bmp_lock -> winsys_sem. */
+extern int CtrlSrv_SetTimerAfter(int delay_ms, void (*cbr)(int, void *), void (*overrun_cbr)(int, void *), void *arg);
+extern void WINSYS_LockRefresh(void);
+extern void WINSYS_UnlockRefresh(int x, int y, int w, int h);
+extern volatile uint32_t winsys_state[];
+
+static void canon_gui_repaint_cbr(int unused, void *arg)
+{
+    int tries = (int) arg;
+
+    if (!canon_gui_repaint_pending || !DISPLAY_IS_ON)
+    {
+        canon_gui_repaint_pending = 0;
+        return;
+    }
+
+    /* +8 deferred, +0xC refresh batch open, +0x10 physical refresh off */
+    int canon_busy = winsys_state[2] || winsys_state[3] || winsys_state[4];
+    if (canon_busy || AcquireRecursiveLock(bmp_lock, 20) != 0)
+    {
+        if (tries < 25 &&
+            !(CtrlSrv_SetTimerAfter(20, canon_gui_repaint_cbr, canon_gui_repaint_cbr, (void *)(tries + 1)) & 1))
+        {
+            return;
+        }
+        /* give up: as before, the missing items come back when they change */
+        canon_gui_repaint_pending = 0;
+        return;
+    }
+
+    WINSYS_LockRefresh();
+    WINSYS_UnlockRefresh(0, 0, 0x400, 0x21C);   /* whole screen, WINSYS coordinates */
+    canon_gui_repaint_pending = 0;
+    ReleaseRecursiveLock(bmp_lock);
+    ml_refresh_display_needed = 1;
+}
+
+void canon_gui_repaint(void)
+{
+    if (canon_gui_repaint_pending)
+        return; /* one request at a time: CtrlSrv's timer pool is small */
+
+    canon_gui_repaint_since = get_ms_clock();
+    canon_gui_repaint_pending = 1;
+    if (CtrlSrv_SetTimerAfter(10, canon_gui_repaint_cbr, canon_gui_repaint_cbr, 0) & 1)
+    {
+        canon_gui_repaint_pending = 0;
+    }
+}
+#endif
 
 static uint32_t indexed2rgbLUT[RGB_LUT_SIZE] = {
 #ifdef CONFIG_R6

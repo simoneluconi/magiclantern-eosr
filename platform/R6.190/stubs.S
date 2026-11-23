@@ -137,7 +137,7 @@ THUMB_FN(0xe079a6c0,  SetGUIRequestMode)                  // by debug message "S
 // gui_init_end and GUI_Control DNE. Implemented via function_overrides.
 
 /** Dialog API **/
-THUMB_FN(0xe078ded8,  dialog_redraw)                      // WINSYS_CreateDialogBox (0xE078DEAC)+0x2C like R5; checks pDialog signature (Dialog.c line 0x2BA)
+THUMB_FN(0xe078ded8,  dialog_redraw)                      // WINSYS_CreateDialogBox (0xE078DEAC)+0x2C like R5; checks pDialog signature (Dialog.c line 0x2BA). Really WINSYS_DisplayDialog: on a dialog already shown it only logs "already Display!!!"; the dirty-rect flush is 0xE078C8C4
 THUMB_FN(0xe0799b50,  dialog_set_property_str)            // call with "RF-TEST" as 3rd arg (0xE0446DC0)
 
 /** GUI timers (2) **/
@@ -192,6 +192,12 @@ THUMB_FN(0xe029652e,  CC_SW2_CBR)
 DATA_PTR(   0x18408,  winsys_sem)                         // Used in VMIX_TransferRectangleToVram() around XimrExe call (take_semaphore([0x18404+4],5000)); created as "Winsys_Wait_v" in VMIX_InitializeScreen
 DATA_PTR(   0x183d4,  _rgb_vram_info)                     // in RENDERER_InitializeScreen(), written just after MARVs are created / "JediWrapperClearSurface vram:%d" (0x183C4+0x10)
 THUMB_FN(0xe01a2688,  XimrExe)                            // In VMIX_TransferRectangleToVram(), just before "XimrExe" debug message; Graphic::XimrApiSub.c
+
+/** Canon GUI repaint (CONFIG_CANON_GUI_REPAINT, src/bmp.c canon_gui_repaint) **/
+THUMB_FN(0xe09abc20,  CtrlSrv_SetTimerAfter)              // WindowSystem::CtrlSrv.c: (delay_ms, cbr, overrun_cbr, arg), cbr(x, arg) runs in task CtrlSrv; odd return = error, 0x17 = CtrlSrv not up; e.g. 0xE044C378
+THUMB_FN(0xe07b8d1a,  WINSYS_LockRefresh)                 // winsys_state+0xC ++
+THUMB_FN(0xe07b8cde,  WINSYS_UnlockRefresh)               // (x,y,w,h): winsys_state+0xC --; at 0, 0xE07B8CB4 repaints the 6 root windows in the rect + VMIX transfer. UpdateLiveViewDialog 0xE05E04CC ends with (0,0,0x400,0x21C)
+DATA_PTR(   0x18430,  winsys_state)                       // the two above; +8 transfer deferred, +0xC refresh batch count, +0x10 physical refresh off (DlgLiveView 0xE05DE7C2)
 
 /**
  * Things needed for CONFIG_COMPOSITOR_XCM.

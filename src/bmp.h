@@ -89,6 +89,11 @@ void indexed2rgb_set(uint8_t color, uint32_t argb);
 
 void rgba_buffer_clear(void);
 
+#ifdef CONFIG_CANON_GUI_REPAINT
+/** Ask Canon to repaint its whole GUI layer, in its own GUI task (bmp.c) */
+void canon_gui_repaint(void);
+#endif
+
 #define RGB_LUT_SIZE 80
 inline uint8_t *bmp_vram_raw() {
     struct MARV *marv = rgb_vram_info;

@@ -5723,7 +5723,13 @@ static void menu_close()
 
     lens_focus_stop();
     menu_lv_transparent_mode = 0;
-    
+
+    #ifdef CONFIG_CANON_GUI_REPAINT
+    // no Canon dialog under the ML menu (e.g. while recording): closing it
+    // won't make Canon repaint what the ML menu covered
+    int canon_dialog_under = (CURRENT_GUI_MODE != 0);
+    #endif
+
     close_canon_menu();
     canon_gui_enable_front_buffer(0);
 
@@ -5733,6 +5739,11 @@ static void menu_close()
     // to display over Canon GUI will trigger redraw, and we'll display
     // ML menu elements too.
     clrscr();
+    #endif
+
+    #ifdef CONFIG_CANON_GUI_REPAINT
+    if (!canon_dialog_under)
+        canon_gui_repaint();
     #endif
 
     redraw();
