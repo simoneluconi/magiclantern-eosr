@@ -35,6 +35,16 @@
 #define MMU_RUNTIME_PAGES 0
 #endif
 
+// CONFIG_MMU_RUNTIME_L2_TABLES: how many L2 tables (one per 1 MB section
+// holding remapped pages) the runtime pages can use. Pages in the same
+// section share a table, so this can be lower than the page count; it is
+// one per runtime page by default.
+#ifdef CONFIG_MMU_RUNTIME_L2_TABLES
+#define MMU_RUNTIME_L2_TABLES CONFIG_MMU_RUNTIME_L2_TABLES
+#else
+#define MMU_RUNTIME_L2_TABLES MMU_RUNTIME_PAGES
+#endif
+
 #if !defined(PTR_ALLOC_MEM_START)
 // If AllocMem start is defined, we assume MMU tables should be located there.
 // Otherwise we reserve space in magiclantern.bin for CONFIG_MMU_REMAP_PAGES
@@ -56,8 +66,8 @@
 static uint8_t generic_mmu_space[CONFIG_MMU_REMAP_PAGES * (MMU_PAGE_SIZE
                                                            + MMU_L2_TABLE_SIZE
                                                            + sizeof(struct mmu_L2_page_info))
-                                 + MMU_RUNTIME_PAGES * (MMU_L2_TABLE_SIZE
-                                                        + sizeof(struct mmu_L2_page_info))
+                                 + MMU_RUNTIME_L2_TABLES * (MMU_L2_TABLE_SIZE
+                                                            + sizeof(struct mmu_L2_page_info))
                                  + MMU_L1_TABLE_SIZE + 0x300]
                __attribute__((aligned(0x10000)));
 #endif
@@ -385,8 +395,8 @@ static int calc_mmu_globals(uint32_t start_addr, uint32_t size)
     while(!reqs_met && num_64k_pages > 0)
     {
         global_mmu_conf.max_64k_pages_remapped = num_64k_pages;
-        // one L2 table per page that can be remapped, runtime pages included
-        uint32_t n_L2 = num_64k_pages + MMU_RUNTIME_PAGES;
+        // one L2 table per boot page, plus the runtime pages' tables
+        uint32_t n_L2 = num_64k_pages + MMU_RUNTIME_L2_TABLES;
         global_mmu_conf.max_L2_tables = n_L2;
         if (fill_forwards)
         {
