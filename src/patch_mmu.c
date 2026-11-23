@@ -1006,14 +1006,15 @@ static uint8_t *find_phys_mem(uint32_t virtual_addr)
 
     uint32_t L2_aligned_virt_addr = virtual_addr & 0xfff00000;
     struct mmu_L2_page_info *L2_table = NULL;
-    uint32_t i;
-    for(i = 0; i < global_mmu_conf.max_L2_tables; i++)
+    for (uint32_t i = 0; i < global_mmu_conf.max_L2_tables; i++)
     {
-        L2_table = &global_mmu_conf.L2_tables[i];
-        if (L2_table->virt_page_mapped == L2_aligned_virt_addr)
+        if (global_mmu_conf.L2_tables[i].virt_page_mapped == L2_aligned_virt_addr)
+        {
+            L2_table = &global_mmu_conf.L2_tables[i];
             break;
+        }
     }
-    if (L2_table == NULL)
+    if (L2_table == NULL) // no table maps this section
         return NULL;
 
     // we now know that *some* addresses in the containing region
