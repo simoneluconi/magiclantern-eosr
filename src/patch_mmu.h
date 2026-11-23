@@ -30,9 +30,10 @@ struct mmu_config
     uint32_t max_64k_pages_remapped;
     uint8_t *phys_mem_pages;
     // CONFIG_MMU_RUNTIME_PAGES: more 64kB pages, taken from Canon's
-    // AllocateMemory after boot; used once phys_mem_pages are all in use.
+    // AllocateMemory after boot or on demand (mmu_add_runtime_pages());
+    // used once phys_mem_pages are all in use.
     uint32_t runtime_64k_pages;
-    uint8_t *runtime_mem_pages;
+    uint8_t **runtime_pages;
 };
 
 extern struct mmu_config global_mmu_conf; // in patch_mmu.c
@@ -41,6 +42,11 @@ void change_mmu_tables_wrapper(void);
 
 int apply_patch(struct patch *patch);
 int apply_normal_patches(void);
+
+// Grows the pool of remappable pages to at least these totals, for cams with
+// CONFIG_MMU_RUNTIME_PAGES_MAX (src/patch_mmu.c). Idempotent; task context
+// only; all or nothing; never freed.
+int mmu_reserve_runtime_pages(uint32_t total_pages, uint32_t total_L2_tables);
 
 // Sets up structures required for remapping via MMU,
 // and applies compile-time specified patches from platform/XXD/include/platform/mmu_patches.h

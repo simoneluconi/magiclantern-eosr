@@ -46,6 +46,22 @@
 #define MMU_RUNTIME_L2_TABLES MMU_RUNTIME_PAGES
 #endif
 
+// CONFIG_MMU_RUNTIME_PAGES_MAX: room for this many runtime pages in all.
+// CONFIG_MMU_RUNTIME_PAGES of them are taken at boot; a feature that needs
+// more only while it is enabled takes them with mmu_add_runtime_pages().
+// Defaults to CONFIG_MMU_RUNTIME_PAGES (nothing on demand).
+#ifdef CONFIG_MMU_RUNTIME_PAGES_MAX
+#define MMU_RUNTIME_PAGES_MAX CONFIG_MMU_RUNTIME_PAGES_MAX
+#else
+#define MMU_RUNTIME_PAGES_MAX MMU_RUNTIME_PAGES
+#endif
+#if MMU_RUNTIME_PAGES_MAX < MMU_RUNTIME_PAGES
+#error "CONFIG_MMU_RUNTIME_PAGES_MAX must be at least CONFIG_MMU_RUNTIME_PAGES"
+#endif
+#if MMU_RUNTIME_PAGES_MAX > 0
+static uint8_t *runtime_pages[MMU_RUNTIME_PAGES_MAX];
+#endif
+
 #if !defined(PTR_ALLOC_MEM_START)
 // If AllocMem start is defined, we assume MMU tables should be located there.
 // Otherwise we reserve space in magiclantern.bin for CONFIG_MMU_REMAP_PAGES
@@ -109,11 +125,12 @@ static int assign_64k_to_L2_table(struct patch *patch,
         {
             pages[i] = global_mmu_conf.phys_mem_pages + MMU_PAGE_SIZE * backing_page_index;
         }
+#if MMU_RUNTIME_PAGES_MAX > 0
         else if (backing_page_index - boot_pages < global_mmu_conf.runtime_64k_pages)
         {
-            pages[i] = global_mmu_conf.runtime_mem_pages
-                       + MMU_PAGE_SIZE * (backing_page_index - boot_pages);
+            pages[i] = global_mmu_conf.runtime_pages[backing_page_index - boot_pages];
         }
+#endif
         else
         {
             return -1;
@@ -596,38 +613,112 @@ static void init_mmu_globals(void)
 
 }
 
-#if MMU_RUNTIME_PAGES > 0
+#if MMU_RUNTIME_PAGES_MAX > 0
 #include "tasks.h"
 extern void *_AllocateMemory(size_t size);
+extern void _FreeMemory(void *ptr);
 
-// Take the CONFIG_MMU_RUNTIME_PAGES pages from Canon's AllocateMemory pool.
-// Runs as an INIT_FUNC: DryOS is up, interrupts are on (patches are applied
-// with interrupts off, so they can't allocate), and ML's own patches are
-// applied later, once ml_started. The memory is never freed.
-static void mmu_runtime_pages_init(void *unused)
+static uint32_t free_runtime_L2_tables(void)
+{
+    uint32_t n = 0;
+    for (uint32_t i = global_mmu_conf.max_64k_pages_remapped; i < global_mmu_conf.max_L2_tables; i++)
+        if (global_mmu_conf.L2_tables[i].L2_table == NULL)
+            n++;
+    return n;
+}
+
+static uint32_t runtime_L2_tables(void)
+{
+    return global_mmu_conf.max_L2_tables - global_mmu_conf.max_64k_pages_remapped
+           - free_runtime_L2_tables();
+}
+
+// Adds n_pages 64kB pages and n_L2_tables L2 tables (one per 1 MB section
+// that holds remapped pages) for ROM patches, from Canon's AllocateMemory pool,
+// in one block: up to 64kB of it is lost to the page alignment.
+// Task context only: it allocates. It only grows the pool and doesn't touch
+// the MMU tables: apply_patch() maps pages from it as usual, and cpu1 takes
+// them through apply_patch()'s SGI sync. Either everything asked for is added
+// or nothing is. Returns 0, or a negative value if nothing was added.
+static int mmu_add_runtime_pages(uint32_t n_pages, uint32_t n_L2_tables)
 {
     if (!mmu_globals_initialised)
-        return;
+        return -1;
+    if (get_cpu_id() != 0)
+        return -2;
+    if (n_pages == 0 && n_L2_tables == 0)
+        return 0;
+    if (n_L2_tables > MMU_RUNTIME_L2_TABLES)
+        return -3;
 
-    // one page more, so the start can be 64kB aligned;
-    // the L2 tables follow the pages (0x400 aligned, as pages are 64kB)
-    void *mem = _AllocateMemory((MMU_RUNTIME_PAGES + 1) * MMU_PAGE_SIZE
-                                + MMU_RUNTIME_L2_TABLES * MMU_L2_TABLE_SIZE);
+    // pages first, 64kB aligned; the L2 tables follow them (0x400 aligned)
+    uint32_t align = n_pages ? MMU_PAGE_SIZE : MMU_L2_TABLE_SIZE;
+    void *mem = _AllocateMemory(n_pages * MMU_PAGE_SIZE + n_L2_tables * MMU_L2_TABLE_SIZE + align);
     if (mem == NULL)
     {
         qprintf("MMU runtime pages: AllocateMemory failed\n");
-        return;
+        return -4;
     }
     // the cached alias is the physical address the L1/L2 entries point to
-    uint32_t base = ROUND_UP((uint32_t)CACHEABLE(mem), MMU_PAGE_SIZE);
-    uint8_t *tables = (uint8_t *)(base + MMU_RUNTIME_PAGES * MMU_PAGE_SIZE);
-    uint32_t first = global_mmu_conf.max_64k_pages_remapped;
-    for (uint32_t i = 0; i < MMU_RUNTIME_L2_TABLES; i++)
-        global_mmu_conf.L2_tables[first + i].L2_table = tables + i * MMU_L2_TABLE_SIZE;
-    global_mmu_conf.runtime_mem_pages = (uint8_t *)base;
-    global_mmu_conf.runtime_64k_pages = MMU_RUNTIME_PAGES;
-    qprintf("MMU runtime pages: %d at 0x%x, %d L2 tables at 0x%x\n",
-            MMU_RUNTIME_PAGES, base, MMU_RUNTIME_L2_TABLES, tables);
+    uint32_t base = ROUND_UP((uint32_t)CACHEABLE(mem), align);
+    uint8_t *tables = (uint8_t *)(base + n_pages * MMU_PAGE_SIZE);
+
+    uint32_t old_int = cli();
+    if (global_mmu_conf.runtime_64k_pages + n_pages > MMU_RUNTIME_PAGES_MAX
+        || free_runtime_L2_tables() < n_L2_tables)
+    {
+        sei(old_int);
+        _FreeMemory(mem);
+        return -5;
+    }
+    global_mmu_conf.runtime_pages = runtime_pages;
+    for (uint32_t k = 0; k < n_pages; k++)
+        runtime_pages[global_mmu_conf.runtime_64k_pages + k] = (uint8_t *)(base + k * MMU_PAGE_SIZE);
+    uint32_t t = 0;
+    for (uint32_t i = global_mmu_conf.max_64k_pages_remapped;
+         i < global_mmu_conf.max_L2_tables && t < n_L2_tables; i++)
+    {
+        if (global_mmu_conf.L2_tables[i].L2_table == NULL)
+            global_mmu_conf.L2_tables[i].L2_table = tables + MMU_L2_TABLE_SIZE * t++;
+    }
+    global_mmu_conf.runtime_64k_pages += n_pages;
+    sei(old_int);
+
+    qprintf("MMU runtime pages: +%d at 0x%x, +%d L2 tables at 0x%x\n",
+            n_pages, base, n_L2_tables, tables);
+    return 0;
+}
+
+// Makes sure the runtime pool holds at least total_pages runtime pages and
+// total_L2_tables runtime L2 tables (the INIT_FUNC's count, boot space not);
+// adds only what is missing, in one AllocateMemory block. Calling it
+// again with the same totals adds nothing, so a feature can call it each time
+// it is enabled. The memory is never freed: remapped pages are never unmapped
+// (unpatching only restores the ROM bytes in the RAM copy). Features that are
+// on at the same time share the pool, so ask for the pages they need together.
+// Task context only (see mmu_add_runtime_pages). Returns 0, or a negative
+// value if nothing was added.
+int mmu_reserve_runtime_pages(uint32_t total_pages, uint32_t total_L2_tables)
+{
+    if (!mmu_globals_initialised)
+        return -1;
+    uint32_t have_pages = global_mmu_conf.runtime_64k_pages;
+    uint32_t have_L2 = runtime_L2_tables();
+    uint32_t n_pages = total_pages > have_pages ? total_pages - have_pages : 0;
+    uint32_t n_L2 = total_L2_tables > have_L2 ? total_L2_tables - have_L2 : 0;
+    return mmu_add_runtime_pages(n_pages, n_L2);
+}
+#endif
+
+#if MMU_RUNTIME_PAGES > 0
+// Take the CONFIG_MMU_RUNTIME_PAGES pages from Canon's AllocateMemory pool.
+// Runs as an INIT_FUNC: DryOS is up, interrupts are on (patches are applied
+// with interrupts off, so they can't allocate), and ML's own patches are
+// applied later, once ml_started.
+static void mmu_runtime_pages_init(void *unused)
+{
+    uint32_t n_L2 = MMU_RUNTIME_PAGES < MMU_RUNTIME_L2_TABLES ? MMU_RUNTIME_PAGES : MMU_RUNTIME_L2_TABLES;
+    mmu_add_runtime_pages(MMU_RUNTIME_PAGES, n_L2);
 }
 INIT_FUNC("mmu_runtime_pages", mmu_runtime_pages_init);
 #endif
