@@ -78,6 +78,13 @@
  * the GUI mapping at 0xE0A616F6). src/lens.c, batt_update. */
 #define CONFIG_BATTERY_POWER_CCAPI_LEVELS
 
+/** Battery % (src/battery.c): PROP_BATTERY_REPORT 0x8003001D, 96 bytes,
+ * count at +0, then 23-byte records; +4 remaining %, +5 performance, as
+ * battery.c reads them (MPU keys 5 / 4 / 6, 0xE01F9218). Canon sends it
+ * only on request, so battery.c asks for it every 10 s, with Canon's own
+ * request (see property_whitelist.h). */
+#define CONFIG_BATTERY_INFO
+
 /** After a shooting mode change (photo <-> movie, mode dial), Canon shows
  * its info for 2..3 s even on the clean INFO screen (seen on camera):
  * no ML overlays meanwhile (src/zebra.c, get_global_draw). */

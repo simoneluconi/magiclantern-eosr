@@ -36,6 +36,11 @@ const uint32_t prop_handler_deny[] =
 // allow writes / allow prop_request_change() for these:
 const uint32_t prop_write_allow[] =
 {
+    // CONFIG_BATTERY_INFO's poll only (src/property.c, battery.c): len 1,
+    // value 0x1F, byte for byte Canon's own request 0xE07AE768 (Battery
+    // info menu, battery warning); the MPU answers with a new report.
+    // CONFIG_PROP_REQUEST_CHANGE stays off: nothing else is written.
+    PROP_BATTERY_REPORT,
 };
 
 // anything not listed above will allow reads but not writes

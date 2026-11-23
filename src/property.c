@@ -348,6 +348,18 @@ static int is_prop_allowed(uint32_t property)
 
 void prop_request_change(unsigned property, const void* addr, size_t len)
 {
+#if defined(CONFIG_BATTERY_INFO) && !defined(CONFIG_PROP_REQUEST_CHANGE)
+    /* Without property writes, CONFIG_BATTERY_INFO still needs its poll:
+     * PROP_BATTERY_REPORT with len 1 asks Canon for a new battery report,
+     * as Canon's own Battery info menu does; it changes no setting.
+     * On D678 it must also be in prop_write_allow[]. Nothing else is sent. */
+    if (property == PROP_BATTERY_REPORT && len == 1 && is_prop_allowed(property))
+    {
+        extern void _prop_request_change(unsigned property, const void* addr, size_t len);
+        _prop_request_change(property, addr, len);
+    }
+#endif
+
 #ifdef CONFIG_PROP_REQUEST_CHANGE
 
     #if defined(CONFIG_40D)
