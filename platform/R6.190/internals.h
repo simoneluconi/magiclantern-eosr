@@ -159,9 +159,16 @@
  * at boot 6.4 KB were left, three did not start. AllocateMemory had
  * 5.4 MB free after boot and while recording 4K (14.5 MB pool).
  * Putting the pages at the start of the AllocMem region before DryOS set
- * it up (0x12C9000) did not start either. */
+ * it up (0x12C9000) did not start either.
+ * The runtime L2 tables live with the runtime pages in AllocateMemory; the
+ * boot space only keeps a small struct per table, so room for 12 tables
+ * costs under 1 KB of user_mem. Up to 13 more pages can be taken on demand
+ * (mmu_reserve_runtime_pages()) by a feature when it is enabled; none at boot. */
 #define CONFIG_MMU_REMAP_PAGES 1
 #define CONFIG_MMU_RUNTIME_PAGES 6
+#define CONFIG_MMU_RUNTIME_PAGES_MAX 19
+#define CONFIG_MMU_RUNTIME_L2_TABLES 12
+#define CONFIG_MAX_PATCHES 48
 
 #define CONFIG_TASK_STRUCT_V2_SMP
 #define CONFIG_TASK_ATTR_STRUCT_V5
