@@ -4352,6 +4352,10 @@ livev_hipriority_task( void* unused )
         static int spotmeter_aux = 0;
         if (spotmeter_draw && should_run_polling_action(1000, &spotmeter_aux))
             BMP_LOCK( if (lv) spotmeter_step(); )
+        // turned off: release its area in the mirror (0x80 marks), or the
+        // other overlays keep skipping it (only spotmeter_step erased it)
+        if (!spotmeter_draw && spotmeter_dirty)
+            BMP_LOCK( spotmeter_erase(); )
         #endif
 
         #ifdef CONFIG_ELECTRONIC_LEVEL
