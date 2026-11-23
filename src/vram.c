@@ -15,7 +15,8 @@
 #ifdef CONFIG_FACEYUV_LV
 /* platform code: ML's LV image is Canon's FaceYuv buffer */
 extern void * faceyuv_lv_buffer(void);  /* CPU address of the current frame, NULL if no live image */
-extern int faceyuv_lv_y0(void);         /* ML row of the image's top row */
+/* its size, and the ML rows it covers (at full width) */
+extern void faceyuv_lv_geometry(int * width, int * height, int * y0, int * y_ex);
 #endif
 
 //~ #define CONFIG_DEBUGMSG 1
@@ -353,17 +354,16 @@ void _update_vram_params()
     os.off_169 = 0;
     os.off_1610 = 0;
 #elif defined(CONFIG_FACEYUV_LV)
-    // LV image = Canon's FaceYuv buffer (get_yuv422_vram), the whole frame
-    // on ML's 720x480 area. Its top row is at faceyuv_lv_y0() in ML
-    // coordinates (R6: 0 on the LCD, -30 in the EVF); the platform marks
-    // the params dirty when that changes. HDMI is not handled (no image).
-    vram_lv.width = FACEYUV_WIDTH;
-    vram_lv.height = FACEYUV_HEIGHT;
+    // LV image = Canon's FaceYuv buffer (get_yuv422_vram), full width, on
+    // ML rows os.y0 .. os.y0 + os.y_ex - 1. The platform gives its size and
+    // position for the current mode and screen (R6: 640x426 on rows 0..479
+    // in photo mode, 640x360 on the 16:9 band 38..441 in movie mode; in the
+    // EVF -30..449 and 8..412) and marks the params dirty when they change.
+    // HDMI is not handled (no image).
+    faceyuv_lv_geometry(&vram_lv.width, &vram_lv.height, &os.y0, &os.y_ex);
     vram_lv.pitch = vram_lv.width * 2;
     os.x0 = 0;
-    os.y0 = faceyuv_lv_y0();
     os.x_ex = 720;
-    os.y_ex = 480;
     os.x_max = os.x0 + os.x_ex;
     os.y_max = os.y0 + os.y_ex;
     os.off_43 = 0;
@@ -464,9 +464,10 @@ void _update_vram_params()
     bm2lv.ty = 0;
     //~ bm2lv.ty = (PLAY_MODE || QR_MODE)? -48 : 0;     
 #elif defined(CONFIG_FACEYUV_LV)
-    // ML's 720x480 area -> the whole FaceYuv buffer, (os.x0, os.y0) -> (0, 0).
-    // R6: sx = 910, sy = 908; in the EVF (os.y0 = -30) ty = 27, so ML rows
-    // -30..449 map to LV rows 0..425.
+    // The image's ML area (os) -> the whole FaceYuv buffer, (os.x0, os.y0)
+    // -> (0, 0). R6 photo mode: sx = 910, sy = 908; in the EVF (os.y0 = -30)
+    // ty = 27, so ML rows -30..449 map to LV rows 0..425. Movie mode on the
+    // LCD: sy = 912, ty = -33, so ML rows 38..441 map to LV rows 0..359.
     bm2lv.sx = 1024 * vram_lv.width / os.x_ex;
     bm2lv.sy = 1024 * vram_lv.height / os.y_ex;
     bm2lv.tx = -((os.x0 * bm2lv.sx) >> 10);

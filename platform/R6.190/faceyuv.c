@@ -4,9 +4,11 @@
  * The R6 has no known LV display buffer that ML can read
  * (YUV422_LV_BUFFER_DISPLAY_ADDR is 0). Canon's face detection works on its
  * own copy of the LV image, "FaceYuv" (LiveViewComp::LvFaceYuvController.c):
- * FACEYUV_WIDTH x FACEYUV_HEIGHT (640x426), 8-bit UYVY with signed chroma
- * (0 = neutral, as on DIGIC 4/5), 4 buffers on IBus channel 1, which the
- * CPU reads through the uncached alias of a static memif window.
+ * 8-bit UYVY with signed chroma (0 = neutral, as on DIGIC 4/5), 4 buffers
+ * on IBus channel 1, which the CPU reads through the uncached alias of a
+ * static memif window. Its size follows the LV mode: 640x426 (3:2) in
+ * photo mode, 640x360 (16:9) in movie mode, also while recording (seen on
+ * camera).
  * Format, location and the buffer choice below are from andrewpoison's
  * R6.190 port (commits 9a507a9b9 and 3e3b12452, r6_faceyuv.c), checked on
  * his camera; the EVF layout from cd5757575 (r6_gdraw.c).
@@ -23,13 +25,19 @@
  *    3-entry ring FY_RING at index s8 MEM(FY_STATE), then increments it
  *    mod 3, so the newest entry is (index + 2) % 3
  *  - a consumer request 0xE0809550 fills record ctx + FY_REC +
- *    FY_REC_STRIDE * k: +4 FrameNum, +0x10 the 64-bit buffer address
+ *    FY_REC_STRIDE * k: +4 FrameNum, +0x10 the 64-bit buffer address,
+ *    + FY_REC_W / FY_REC_H the frame's size
  *  - the next-buffer getter 0xE0809390 hands out buffer [ctx + FY_GET_IDX]
  *    and then increments that byte mod 4
  * So: the record with the newest ring FrameNum (or the newest older one)
- * gives the buffer, if it is one of the 4. Without a record, take the
- * buffer handed out before the most recent one (that one may still be
- * written).
+ * gives the buffer, if it is one of the 4 and of the current size. Without
+ * a record, take the buffer handed out before the most recent one (that
+ * one may still be written).
+ *
+ * After a photo <-> movie change, the 4 buffers and FY_SIZE change first;
+ * for about 2 s the records (and FY_INFO) still describe frames of the old
+ * size, in the old buffers (seen on camera). So the size is checked at
+ * every source, and such a frame is not used.
  */
 
 #include "dryos.h"
@@ -40,14 +48,23 @@
 #define FY_STATE      0x1ED68   /* s8 [+0] ring index, [+0xC] ctx */
 #define FY_CTX_SIZE   0xB060
 #define FY_RING       0x164614  /* 3 x {flag, FrameNum} */
-#define FY_SIZE       0x11FC8   /* u16 width, u16 height of the FaceYuv image */
 #define FY_GET_IDX    0xB029
 #define FY_REC        0x40
 #define FY_REC_STRIDE 0xA0
+#define FY_REC_W      0x1C      /* u32 width of the record's frame */
+#define FY_REC_H      0x20      /* u32 height */
 #define FY_MEMIF_WIN  0x1355A4  /* RAM copy of the 12 static memif windows (0xE089F230); [11] = copied */
 #define FY_CH_LIMIT   0x106484  /* RAM end of DRAM channel 1 (MemifApiInit 0xE01053BC) */
-#define FY_BYTES      (FACEYUV_WIDTH * 2 * FACEYUV_HEIGHT)
 #define FY_STALE_MS   1000
+
+/* FaceYuv size of the current LV mode, u16 width, u16 height: LVIC copies
+ * it here (0xE05D5854) from the FaceYuv size table FY_STATE + 0x20, picked
+ * by 0xE08094C0 */
+#define FY_SIZE       0x11FC8
+
+/* copy of the newest LV record from its + 0x10 (0xE08D8B64):
+ * + 0xC width, + 0x10 height */
+#define FY_INFO       0x114520
 
 /* [[DISP_DEV_PTR] + 0x18] = display outputs (0xE01694C8):
  * bit 0 LCD panel, bit 4 EVF, 0x1100 HDMI / line out */
@@ -55,15 +72,46 @@
 #define DISP_LCD      0x01
 #define DISP_EVF      0x10
 
-/* Canon's live EVF image info: DISPIMAGEINFO (builder 0xE02995A8) copied
- * for the EVF to DVC + 0x390 (dispVramCtrl_SetOnlyParamIMGRepVram
- * 0xE061DF20), + 0x428 when double buffered. Live slot: +0 == 1 and
- * +4 == 1. +0x14 / +0x18 buffer size, +0x24 / +0x28 position in the panel. */
+/* Canon's live image info per output: DISPIMAGEINFO (builder 0xE02995A8),
+ * copied by dispVramCtrl_SetOnlyParamIMGRepVram 0xE061DF20 to DVC + 0x1C8
+ * (+ 0x260 when double buffered) for the LCD, + 0x390 (+ 0x428) for the
+ * EVF. Live slot: +0 == 1, +4 == 0 (LCD) / 1 (EVF). Seen on camera:
+ * +0x14 / +0x18 buffer size, +0x24 / +0x28 the image's position on the
+ * panel, +0x2C / +0x30 its size. */
 #define DISP_VRAM_CTRL_PTR 0xEA60
+#define DISP_IMG_X    0x24
+#define DISP_IMG_Y    0x28
+#define DISP_IMG_W    0x2C
+#define DISP_IMG_H    0x30
 
-/* In the EVF, Canon shows the 1280x854 image at the top of the 1280x960
- * panel, i.e. at ML rows -30..449 (cd5757575, BlackBelt lookup 0xE080BEC4) */
-#define FACEYUV_EVF_Y0 (-30)
+/* The layouts we map: Canon's image on the panel (as in the BlackBelt
+ * table, lookup 0xE080BEC4, and seen on camera), and the ML rows that the
+ * whole FaceYuv image covers, at full width.
+ * LCD: 900x600 panel = ML's 720x480 (0.8 ML rows per panel row).
+ * EVF: 1280x960 panel, ML's 720x480 on its middle 1280x854 band (rows
+ * 53..906, 480 / 854 ML rows per panel row), so the photo image at the
+ * panel's top starts at ML row -30.
+ * Movie: LCD image rows 47..552 -> ML 37.6..442.4, i.e. 38..441;
+ * EVF rows 67..786 -> ML 7.9..412.6, i.e. 8..412. */
+struct fy_layout
+{
+    uint16_t fy_w, fy_h;            /* FaceYuv size (FY_SIZE) */
+    uint16_t out;                   /* DISP_LCD or DISP_EVF */
+    uint16_t img_w, img_h, img_y;   /* Canon's image on the panel, at x = 0 */
+    int16_t  y0, y_ex;              /* ML rows y0 .. y0 + y_ex - 1 */
+};
+
+static const struct fy_layout fy_layouts[] = {
+    /* photo mode (3:2) */
+    { 640, 426, DISP_LCD,  900, 600,  0,   0, 480 },
+    { 640, 426, DISP_EVF, 1280, 854,  0, -30, 480 },
+    /* movie mode (16:9) */
+    { 640, 360, DISP_LCD,  900, 506, 47,  38, 404 },
+    { 640, 360, DISP_EVF, 1280, 720, 67,   8, 405 },
+};
+
+/* the layout vram.c is set up for (faceyuv_lv_geometry) */
+static const struct fy_layout * volatile fy_layout = &fy_layouts[0];
 
 #define RD(a) (*(volatile uint32_t *)(a))
 
@@ -111,15 +159,16 @@ static int rd64(uint32_t a, uint32_t * lo, uint32_t * hi)
     return 0;
 }
 
-/* CPU address (uncached alias) of the newest complete FaceYuv frame, or 0;
- * *frame = its FrameNum */
-static uint32_t faceyuv_locate(uint32_t * frame)
+/* CPU address (uncached alias) of the newest complete w x h FaceYuv frame,
+ * or 0; *frame = its FrameNum */
+static uint32_t faceyuv_locate(uint32_t * frame, uint32_t w, uint32_t h)
 {
+    const uint32_t bytes = w * 2 * h;
     if (!uncached_ok()) return 0;
 
     uint32_t ctx = RD(FY_STATE + 0xC);
     if (!ram_ok(ctx, FY_CTX_SIZE)) return 0;
-    if (RD(FY_SIZE) != (((uint32_t) FACEYUV_HEIGHT << 16) | FACEYUV_WIDTH)) return 0;
+    if (RD(FY_SIZE) != ((h << 16) | w)) return 0;
 
     int ring_i = (int8_t) rd8(FY_STATE);
     if (ring_i < 0 || ring_i > 2) return 0;
@@ -129,12 +178,14 @@ static uint32_t faceyuv_locate(uint32_t * frame)
     for (int k = 0; k < 4; k++)
         if (!rd64(ctx + 0x20 + 8 * k, &blo[k], &bhi[k])) return 0;
 
-    /* the newest record not newer than the ring's frame */
+    /* the newest record not newer than the ring's frame; records of
+     * another size are from before a mode change */
     int pick = -1, best_d = 16;
     for (int k = 0; k < 4; k++)
     {
         uint32_t rec = ctx + FY_REC + FY_REC_STRIDE * k, lo, hi;
         uint32_t f = RD(rec + 4);
+        if (RD(rec + FY_REC_W) != w || RD(rec + FY_REC_H) != h) continue;
         if (!rd64(rec + 0x10, &lo, &hi)) continue;
         int m = -1;
         for (int j = 0; j < 4; j++)
@@ -144,6 +195,8 @@ static uint32_t faceyuv_locate(uint32_t * frame)
     }
     if (pick < 0)
     {
+        /* the newest frame must have the current size, too */
+        if (RD(FY_INFO + 0xC) != w || RD(FY_INFO + 0x10) != h) return 0;
         uint32_t g = rd8(ctx + FY_GET_IDX);
         if (g > 3) return 0;
         pick = (g + 2) & 3;
@@ -157,39 +210,58 @@ static uint32_t faceyuv_locate(uint32_t * frame)
     int win = -1;
     for (int i = 4; i < 12 && win < 0; i++)
     {
-        uint32_t w = RD(FY_MEMIF_WIN + 4 * i);
-        if ((w & 7) == hi && (w & 0xF0000000) == (lo & 0xF0000000) && !(w & 0x0FFFFFF8))
+        uint32_t m = RD(FY_MEMIF_WIN + 4 * i);
+        if ((m & 7) == hi && (m & 0xF0000000) == (lo & 0xF0000000) && !(m & 0x0FFFFFF8))
             win = i;
     }
     if (win < 4 || win > 7) return 0;
-    if ((lo & 0x0FFFFFFF) + FY_BYTES > 0x10000000) return 0;
+    if ((lo & 0x0FFFFFFF) + bytes > 0x10000000) return 0;
     uint32_t lim = RD(FY_CH_LIMIT);
-    if (!lim || lo + FY_BYTES < lo || lo + FY_BYTES > lim) return 0;
+    if (!lim || lo + bytes < lo || lo + bytes > lim) return 0;
 
     uint32_t cpu = ((uint32_t) win << 28) | (lo & 0x0FFFFFFF);
-    return ram_ok(cpu, FY_BYTES) ? cpu : 0;
+    return ram_ok(cpu, bytes) ? cpu : 0;
 }
 
-/* only the EVF layout we map: the 1280x854 stills image at the panel's top */
-static int evf_layout_ok(void)
+/* the live slot of one output: 1 and its image size and position, or 0 */
+static int disp_image(int evf, uint32_t * w, uint32_t * h, uint32_t * x, uint32_t * y)
 {
-    static const uint16_t slots[2] = { 0x390, 0x428 };
+    static const uint16_t slots[2][2] = { { 0x1C8, 0x260 }, { 0x390, 0x428 } };
     uint32_t dvc = RD(DISP_VRAM_CTRL_PTR);
     for (int s = 0; s < 2; s++)
     {
-        uint32_t b = dvc + slots[s];
-        if (!dvc || !ram_ok(b, 0x2C)) return 0;
-        if (RD(b) != 1 || RD(b + 4) != 1) continue;
-        return RD(b + 0x14) == 1280 && RD(b + 0x18) == 854 && RD(b + 0x24) == 0 && RD(b + 0x28) == 0;
+        uint32_t b = dvc + slots[evf][s];
+        if (!dvc || !ram_ok(b, DISP_IMG_H + 4)) return 0;
+        if (RD(b) != 1 || RD(b + 4) != (uint32_t) evf) continue;
+        *w = RD(b + DISP_IMG_W); *h = RD(b + DISP_IMG_H);
+        *x = RD(b + DISP_IMG_X); *y = RD(b + DISP_IMG_Y);
+        return 1;
     }
     return 0;
 }
 
-static volatile int on_evf = 0;
-
-int faceyuv_lv_y0(void)
+/* the layout for this output and FaceYuv size, or NULL (HDMI, an image
+ * not in the table, no live slot) */
+static const struct fy_layout * fy_find_layout(uint32_t out, uint32_t size)
 {
-    return on_evf ? FACEYUV_EVF_Y0 : 0;
+    for (int i = 0; i < COUNT(fy_layouts); i++)
+    {
+        const struct fy_layout * l = &fy_layouts[i];
+        if (l->out != out || size != (((uint32_t) l->fy_h << 16) | l->fy_w)) continue;
+        uint32_t w, h, x, y;
+        if (!disp_image(out == DISP_EVF, &w, &h, &x, &y)) return NULL;
+        return (w == l->img_w && h == l->img_h && x == 0 && y == l->img_y) ? l : NULL;
+    }
+    return NULL;
+}
+
+void faceyuv_lv_geometry(int * width, int * height, int * y0, int * y_ex)
+{
+    const struct fy_layout * l = fy_layout;
+    *width = l->fy_w;
+    *height = l->fy_h;
+    *y0 = l->y0;
+    *y_ex = l->y_ex;
 }
 
 void * faceyuv_lv_buffer(void)
@@ -197,8 +269,7 @@ void * faceyuv_lv_buffer(void)
     static uint32_t last_frame = 0;
     static int t_frame = 0, frame_seen = 0;
 
-    /* Canon's LV runs, photo mode: the movie LV layout is not checked */
-    if (!lv || is_movie_mode() || lv_movie_select == LVMS_ENABLE_MOVIE)
+    if (!lv)
     {
         frame_seen = 0;
         return NULL;
@@ -209,17 +280,22 @@ void * faceyuv_lv_buffer(void)
     if (!ram_ok(dev, 0x1C)) return NULL;
     uint32_t outputs = RD(dev + 0x18);
     if (outputs != DISP_LCD && outputs != DISP_EVF) return NULL;
-    if (outputs == DISP_EVF && !evf_layout_ok()) return NULL;
-    int evf = (outputs == DISP_EVF);
-    if (evf != on_evf)
+
+    /* photo (3:2) or movie (16:9) image, on a screen layout we know */
+    const struct fy_layout * l = fy_find_layout(outputs, RD(FY_SIZE));
+    if (!l) return NULL;
+    if (l != fy_layout)
     {
-        /* os.y0 and bm2lv follow the screen (src/vram.c) */
-        on_evf = evf;
+        /* vram_lv and os follow (src/vram.c, on the next
+         * get_yuv422_vram); this frame is not used */
+        fy_layout = l;
         vram_params_set_dirty();
+        frame_seen = 0;
+        return NULL;
     }
 
     uint32_t frame = 0;
-    uint32_t cpu = faceyuv_locate(&frame);
+    uint32_t cpu = faceyuv_locate(&frame, l->fy_w, l->fy_h);
     if (!cpu) return NULL;
 
     /* a ring that stopped moving (LV paused) is not a live image */

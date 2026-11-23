@@ -5336,8 +5336,8 @@ int take_fast_pictures( int number )
 }
 
 #ifdef FEATURE_MOTION_DETECT
-/* Some cameras have no LV image at times (CONFIG_FACEYUV_LV: e.g. movie
- * mode, HDMI, both LCD and EVF on): get_spot_yuv_ex() then leaves Y unset
+/* Some cameras have no LV image at times (CONFIG_FACEYUV_LV: e.g. HDMI,
+ * both LCD and EVF on, a mode change): get_spot_yuv_ex() then leaves Y unset
  * and get_spot_motion() returns 0, so detect nothing without an image. */
 static int md_lv_image_ok()
 {

@@ -108,8 +108,9 @@
 #define CONFIG_NO_FORCE_LIVEVIEW
 
 /** ML's LV image (get_yuv422_vram) is Canon's FaceYuv buffer, see
- * faceyuv.c: FACEYUV_WIDTH x FACEYUV_HEIGHT UYVY with signed chroma,
- * shown on ML's whole 720x480 area (src/vram.c, src/imgconv.h). */
+ * faceyuv.c: UYVY with signed chroma, 640x426 in photo mode (ML's whole
+ * 720x480 area), 640x360 in movie mode (the 16:9 band Canon shows);
+ * src/vram.c, src/imgconv.h. */
 #define CONFIG_FACEYUV_LV
 
 /** PTP (only used when building with CONFIG_PTP=y):

@@ -200,10 +200,8 @@
 
 #define YUV422_HD_BUFFER_DMA_ADDR 0x0 // it expects this to be shamem_read(some_DMA_ADDR)
 
-/* ML's LV image instead (CONFIG_FACEYUV_LV, faceyuv.c): Canon's FaceYuv
- * buffer, the whole 3:2 frame (u16 size at 0x11FC8) */
-#define FACEYUV_WIDTH  640
-#define FACEYUV_HEIGHT 426
+/* ML's LV image instead: Canon's FaceYuv buffer, the whole frame; its size
+ * follows the LV mode (CONFIG_FACEYUV_LV, faceyuv.c) */
 
 /* WRONG! */
 #define HALFSHUTTER_PRESSED         0

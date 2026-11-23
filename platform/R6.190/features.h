@@ -45,8 +45,8 @@
 // ML's LV overlays, with Canon's FaceYuv as the LV image (CONFIG_FACEYUV_LV).
 // They draw only while get_global_draw() allows it: in LV, in Canon's
 // LV_OVERLAYS_MODE 3 (the clean INFO screen, in photo and movie mode on
-// R6). The ones that read the image also need a FaceYuv frame:
-// photo mode, LCD or EVF alone (faceyuv.c).
+// R6). The ones that read the image also need a FaceYuv frame: photo or
+// movie mode (also while recording), LCD or EVF alone, not HDMI (faceyuv.c).
 // Only what the R6 lacks; zebras, focus peaking and the histogram are
 // Canon's own on R6.
 #define FEATURE_GLOBAL_DRAW
@@ -57,14 +57,14 @@
 #define FEATURE_VECTORSCOPE
 
 // Shoot > Motion Detect (not native on R6). Reads the FaceYuv image, so it
-// only detects in photo LV with the LCD or the EVF alone; takes pictures
+// only detects in LV with the LCD or the EVF alone; takes pictures
 // with lens_take_picture(), i.e. SW1 / SW2 through Canon's shutter switch
 // callbacks (CONFIG_SW12_VIA_CC). Interval and bulb timers are Canon's own
 // on R6, so FEATURE_INTERVALOMETER / FEATURE_BULB_TIMER stay off.
 #define FEATURE_MOTION_DETECT
 
 // Debug > Screenshot, as on R / RP / M50 / 850D: ML's graphics, plus the
-// LV image where ML has one (FaceYuv, photo mode). Canon's own graphics
+// LV image where ML has one (FaceYuv, LCD or EVF). Canon's own graphics
 // are in a layer ML does not read, so they are not in the file.
 #define FEATURE_SCREENSHOT
 
