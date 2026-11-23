@@ -3606,7 +3606,7 @@ static LVINFO_UPDATE_FUNC(batt_update)
     item->height = 30;
 
     #ifdef CONFIG_BATTERY_INFO
-    item->width = 70;
+    item->width = 76;
     #else
     item->width = 20;
     #endif
@@ -3646,7 +3646,8 @@ static LVINFO_UPDATE_FUNC(batt_update)
         #endif
 
         #ifdef CONFIG_BATTERY_INFO
-        bmp_printf(SHADOW_FONT(FONT(FONT_MED, col, item->color_bg)), xr+16, y_origin + 30 - font_med.height, "%d%%", bat);
+        /* the icon ends at xr+14; leave room for the text shadow (it touched the icon on R6) */
+        bmp_printf(SHADOW_FONT(FONT(FONT_MED, col, item->color_bg)), xr+20, y_origin + 30 - font_med.height, "%d%%", bat);
         #endif
         
         bat = bat * 20 / 100;
