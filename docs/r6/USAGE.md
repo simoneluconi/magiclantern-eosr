@@ -47,7 +47,7 @@ Only features the R6 does not have already are enabled. Every new option starts 
 
 ### Overlays
 
-**Spotmeter**, **False color**, **Waveform** and **Vectorscope** in the Overlay menu. They need Global Draw and Canon's clean INFO screen. They work in photo and movie mode, also while recording. In movie mode they cover the 16:9 image, and ML's bars sit in the black bands above and below it. For about 2 seconds after a photo/movie change they are not drawn. They don't draw under ML's own graphics (bars, the spotmeter box). Not shown in the viewfinder yet.
+**Spotmeter**, **False color**, **Waveform** and **Vectorscope** in the Overlay menu. They need Global Draw and Canon's clean INFO screen. They work in photo and movie mode, also while recording. In movie mode they cover the 16:9 image, and ML's bars sit in the black bands above and below it. For about 2 seconds after a photo/movie change they are not drawn. They don't draw under ML's own graphics (bars, the spotmeter box). In the viewfinder, ML draws on Canon's first INFO screen there (the one with only the exposure below the image); Canon's own info can still leave gaps in ML's bars.
 
 ### Modules: Lua scripts and the file manager
 

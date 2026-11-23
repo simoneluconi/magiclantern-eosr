@@ -54,7 +54,7 @@ this fork is only maintained and tested for the R6.
 - **Trimming long clips on the camera**: clips over 30 minutes play back on the camera, but Canon's movie editor keeps its own limits.
 - **Other modules** (dual ISO, MLV / RAW video, silent pictures...) are not included: they need parts of ML that don't exist yet on DIGIC X.
 - **Lua scripts that change camera settings** (exposure, shooting) fail: the R6 build does not allow property writes.
-- ML overlays are not shown in the viewfinder.
+- In the viewfinder, ML's bars and overlays show only on Canon's first ("empty") INFO screen, and Canon's own info can leave gaps in ML's bars.
 - Zebras, focus peaking, histogram, intervalometer and bulb timer are **not enabled on purpose**: the R6 has its own.
 
 ## Documentation
