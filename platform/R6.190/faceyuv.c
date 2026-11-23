@@ -85,29 +85,32 @@
 #define DISP_IMG_H    0x30
 
 /* The layouts we map: Canon's image on the panel (as in the BlackBelt
- * table, lookup 0xE080BEC4, and seen on camera), and the ML rows that the
- * whole FaceYuv image covers, at full width.
+ * table, lookup 0xE080BEC4, and seen on camera), and where ML's 3:2 LV
+ * area (720x480, full width) starts, with the 16:9 bars inside it that the
+ * movie image leaves (ML's os.off_169; the FaceYuv image is only the part
+ * between them).
  * LCD: 900x600 panel = ML's 720x480 (0.8 ML rows per panel row).
  * EVF: 1280x960 panel, ML's 720x480 on its middle 1280x854 band (rows
- * 53..906, 480 / 854 ML rows per panel row), so the photo image at the
+ * 53..906, 480 / 854 ML rows per panel row), so the 3:2 area at the
  * panel's top starts at ML row -30.
- * Movie: LCD image rows 47..552 -> ML 37.6..442.4, i.e. 38..441;
- * EVF rows 67..786 -> ML 7.9..412.6, i.e. 8..412. */
+ * Movie: LCD image rows 47..552 -> ML 37.6..442.4, i.e. 38..441 (bars of
+ * 38 rows); EVF rows 67..786 -> ML 7.9..412.6, i.e. 38 rows below -30. */
 struct fy_layout
 {
     uint16_t fy_w, fy_h;            /* FaceYuv size (FY_SIZE) */
     uint16_t out;                   /* DISP_LCD or DISP_EVF */
     uint16_t img_w, img_h, img_y;   /* Canon's image on the panel, at x = 0 */
-    int16_t  y0, y_ex;              /* ML rows y0 .. y0 + y_ex - 1 */
+    int16_t  y0;                    /* ML row of the 3:2 area's top */
+    int16_t  off_169;               /* 16:9 bars, ML rows each */
 };
 
 static const struct fy_layout fy_layouts[] = {
     /* photo mode (3:2) */
-    { 640, 426, DISP_LCD,  900, 600,  0,   0, 480 },
-    { 640, 426, DISP_EVF, 1280, 854,  0, -30, 480 },
+    { 640, 426, DISP_LCD,  900, 600,  0,   0,  0 },
+    { 640, 426, DISP_EVF, 1280, 854,  0, -30,  0 },
     /* movie mode (16:9) */
-    { 640, 360, DISP_LCD,  900, 506, 47,  38, 404 },
-    { 640, 360, DISP_EVF, 1280, 720, 67,   8, 405 },
+    { 640, 360, DISP_LCD,  900, 506, 47,   0, 38 },
+    { 640, 360, DISP_EVF, 1280, 720, 67, -30, 38 },
 };
 
 /* the layout vram.c is set up for (faceyuv_lv_geometry) */
@@ -255,13 +258,13 @@ static const struct fy_layout * fy_find_layout(uint32_t out, uint32_t size)
     return NULL;
 }
 
-void faceyuv_lv_geometry(int * width, int * height, int * y0, int * y_ex)
+void faceyuv_lv_geometry(int * width, int * height, int * y0, int * off_169)
 {
     const struct fy_layout * l = fy_layout;
     *width = l->fy_w;
     *height = l->fy_h;
     *y0 = l->y0;
-    *y_ex = l->y_ex;
+    *off_169 = l->off_169;
 }
 
 void * faceyuv_lv_buffer(void)
