@@ -66,6 +66,12 @@
  * free while recording (src/lens.c, free_space_update). */
 #define CONFIG_REC_INDICATOR_IN_TOP_BAR
 
+/** PROP_BATTERY_POWER holds Canon's CCAPI battery levels, not 0/1/2 bars:
+ * 0 low, 1 half, 2 full, 3 none, 4 high, 5 quarter, 6 error, 7 invalid,
+ * 8..10 charging (names: CCAPI enum table at 0xE1C914AC; icon order from
+ * the GUI mapping at 0xE0A616F6). src/lens.c, batt_update. */
+#define CONFIG_BATTERY_POWER_CCAPI_LEVELS
+
 /** After a shooting mode change (photo <-> movie, mode dial), Canon shows
  * its info for 2..3 s even on the clean INFO screen (seen on camera):
  * no ML overlays meanwhile (src/zebra.c, get_global_draw). */

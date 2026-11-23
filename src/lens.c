@@ -3608,16 +3608,32 @@ static LVINFO_UPDATE_FUNC(batt_update)
         int y_origin = item->y;
         xr += 4;
 
-        #ifdef CONFIG_BATTERY_INFO
-        int bat = GetBatteryLevel();
+        #ifdef CONFIG_BATTERY_POWER_CCAPI_LEVELS
+        /* Canon's CCAPI levels: 0 low, 1 half, 2 full, 3 none, 4 high, 5 quarter,
+         * 6 error, 7 invalid (not drawn), 8..10 charging / stopped / complete */
+        static const int8_t ccapi_bar[] = { 10, 50, 100, 0, 75, 25, 0, -1, 100, 100, 100 };
+        int level = battery_level_bars;
+        if (level < 0 || level >= COUNT(ccapi_bar) || ccapi_bar[level] < 0)
+        {
+            return;
+        }
+        int bar = ccapi_bar[level];
+        int col =
+            bar <= 10 ? COLOR_RED :
+            bar <= 50 ? COLOR_YELLOW :
+            COLOR_WHITE;
         #else
-        int bat = battery_level_bars == 0 ? 5 : battery_level_bars == 1 ? 30 : 100;
+        int bar = battery_level_bars == 0 ? 5 : battery_level_bars == 1 ? 30 : 100;
+        int col =
+            battery_level_bars == 0 ? COLOR_RED :
+            battery_level_bars == 1 ? COLOR_YELLOW :
+            COLOR_WHITE;
         #endif
 
-        int col = 
-            battery_level_bars == 0 ? COLOR_RED :
-            battery_level_bars == 1 ? COLOR_YELLOW : 
-            COLOR_WHITE;
+        int bat = bar;
+        #ifdef CONFIG_BATTERY_INFO
+        bat = GetBatteryLevel();
+        #endif
 
         #ifdef CONFIG_BATTERY_INFO
         bmp_printf(SHADOW_FONT(FONT(FONT_MED, col, item->color_bg)), xr+16, y_origin + 30 - font_med.height, "%d%%", bat);
