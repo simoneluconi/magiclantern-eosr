@@ -193,6 +193,11 @@ DATA_PTR(   0x18408,  winsys_sem)                         // Used in VMIX_Transf
 DATA_PTR(   0x183d4,  _rgb_vram_info)                     // in RENDERER_InitializeScreen(), written just after MARVs are created / "JediWrapperClearSurface vram:%d" (0x183C4+0x10)
 THUMB_FN(0xe01a2688,  XimrExe)                            // In VMIX_TransferRectangleToVram(), just before "XimrExe" debug message; Graphic::XimrApiSub.c
 
+/** Sound effects (CONFIG_BEEP_SE, src/beep.c), AudioDS::AudioBeep.c **/
+THUMB_FN(0xe085e044,  SE_BeepStart)                       // "SE_BeepStart" 0xE0FB8BEC; (tag, 0x40-byte request): copies it, posts event 1 to "ABeepObject"; called by SE_PlayStart 0xE085E4F6, SE_TestWavPlayStart 0xE085E902
+THUMB_FN(0xe085e0b4,  SE_BeepStop)                        // "SE_BeepStop" 0xE0FB8BFC; 0 = tone generator, 1 = PCM channel; posts event 2
+THUMB_FN(0xe085e380,  SE_PlayPWMWait)                     // "SE_PlayPWMWait" 0xE0FB8CBC; waits for PCM state [[0xE628]+0x48] == 3 (msleep 11), SE_BeepStop(1) after 16 polls (at once if arg 0)
+
 /** Canon GUI repaint (CONFIG_CANON_GUI_REPAINT, src/bmp.c canon_gui_repaint) **/
 THUMB_FN(0xe09abc20,  CtrlSrv_SetTimerAfter)              // WindowSystem::CtrlSrv.c: (delay_ms, cbr, overrun_cbr, arg), cbr(x, arg) runs in task CtrlSrv; odd return = error, 0x17 = CtrlSrv not up; e.g. 0xE044C378
 THUMB_FN(0xe07b8d1a,  WINSYS_LockRefresh)                 // winsys_state+0xC ++

@@ -72,6 +72,16 @@
  * repaint the screen then (src/bmp.c, canon_gui_repaint; stubs.S). */
 #define CONFIG_CANON_GUI_REPAINT
 
+/** ML beeps (src/beep.c) through Canon's sound-effect layer, as DIGIC X
+ * has no StartASIFDMADAC: beep.c's tone (48 kHz mono PCM, DMA memory)
+ * is played with SE_BeepStart(0, PCM request), the way Canon's own test
+ * command SE_TestWavPlayStart (0xE085E8CA) plays B:/BEEPn.WAV. Canon's
+ * beeps come from a fixed-pitch tone generator, so ML's sound different.
+ * Canon's "Beep" setting (PROP_BEEP) also silences ML; never while
+ * RECORDING. No property or register write. */
+#define CONFIG_BEEP
+#define CONFIG_BEEP_SE
+
 /** PROP_BATTERY_POWER holds Canon's CCAPI battery levels, not 0/1/2 bars:
  * 0 low, 1 half, 2 full, 3 none, 4 high, 5 quarter, 6 error, 7 invalid,
  * 8..10 charging (names: CCAPI enum table at 0xE1C914AC; icon order from

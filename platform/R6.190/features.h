@@ -68,6 +68,9 @@
 // are in a layer ML does not read, so they are not in the file.
 #define FEATURE_SCREENSHOT
 
+// Audio > Beep, test tones (src/beep.c, CONFIG_BEEP_SE in internals.h)
+#define FEATURE_BEEP
+
 #undef CONFIG_CRASH_LOG
 #undef CONFIG_PROP_REQUEST_CHANGE
 #undef CONFIG_AUTOBACKUP_ROM

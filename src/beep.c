@@ -46,6 +46,23 @@ static int beep_freq_values[] = {55, 110, 220, 262, 294, 330, 349, 392, 440, 494
 
 static void generate_beep_tone(int16_t* buf, int N, int freq, int wavetype);
 
+#ifdef CONFIG_BEEP_SE
+#ifdef FEATURE_WAV_RECORDING
+#error FEATURE_WAV_RECORDING needs the ASIF backend, not CONFIG_BEEP_SE.
+#endif
+
+/* Canon's "Beep" setting: Canon checks it where a beep is requested, not in
+ * the sound-effect layer, so ML has to check it too (0 = Disable) */
+static int canon_beep_enabled = 1;
+PROP_HANDLER(PROP_BEEP)
+{
+    canon_beep_enabled = buf[0];
+}
+#define BEEPS_ON() (beep_enabled && canon_beep_enabled)
+#else
+#define BEEPS_ON() (beep_enabled)
+#endif
+
 static int is_safe_to_beep()
 {
     if (audio_recording)
@@ -53,7 +70,16 @@ static int is_safe_to_beep()
         /* do not beep while recording WAV */
         return 0;
     }
-    
+
+    #ifdef CONFIG_BEEP_SE
+    if (RECORDING)
+    {
+        /* never into a movie: Canon blocks the PCM channel only while it
+         * records sound */
+        return 0;
+    }
+    #endif
+
     if (RECORDING && sound_recording_enabled())
     {
         /* do not beep while recording any kind of video with sound */
@@ -72,6 +98,98 @@ static int is_safe_to_beep()
     /* no restrictions */
     return 1;
 }
+
+#ifdef CONFIG_BEEP_SE
+/* DIGIC X has no StartASIFDMADAC. The tone goes through Canon's
+ * sound-effect layer (AudioDS::AudioBeep.c) instead, on its PCM channel:
+ * any 16-bit buffer at 48 or 24 kHz. Only the control-ring click uses that
+ * channel in ROM; Canon's beeps (AF, self-timer) come from a fixed-pitch
+ * tone generator, so ML's tones sound different from all of them.
+ * Same calls as Canon's test command SE_TestWavPlayStart (0xE085E8CA):
+ * SE_PlayPWMWait(1), then SE_BeepStart(0, request). Tag 0: no end side
+ * effects (tags 1 and 6 post PROP_BUZZER complete events). */
+struct se_beep_req                          /* copied by SE_BeepStart */
+{
+    uint32_t kind;                          /* 0x00: 0 tone generator, 1 PCM */
+    void *   pcm;                           /* 0x04: DMA (uncacheable) memory */
+    uint32_t pcm_size;                      /* 0x08: bytes */
+    uint32_t unk_0c;
+    uint32_t unk_10;
+    uint8_t  gain_class;                    /* 0x14: generator only */
+    uint8_t  pad[3];
+    uint32_t unk_18;
+    uint32_t pcm_gain_mode;                 /* 0x1C: 0 = Canon's calibrated beep gain */
+    uint32_t unk_20;
+    uint32_t rate_khz;                      /* 0x24: 48 or 24 */
+    uint32_t bits;                          /* 0x28: 16 */
+    uint32_t channels;                      /* 0x2C: 1 */
+    uint32_t unk_30;
+    uint32_t gen_on, gen_off, gen_count;    /* 0x34..0x3C: generator only */
+};
+extern int SE_BeepStart(int tag, struct se_beep_req * req);
+extern int SE_BeepStop(int channel);        /* 0 generator, 1 PCM */
+extern int SE_PlayPWMWait(int keep);
+
+/* PCM channel state: 0 requested, 1 playing, 2 stopping, 3 idle */
+static int se_pcm_idle()
+{
+    return MEM(MEM(SE_BEEP_OBJ) + 0x48) == 3;
+}
+
+static void asif_stop_cbr()
+{
+    SE_BeepStop(1);
+    beep_playing = 0;
+}
+
+/* synchronous: returns when the sound has ended; buf from fio_malloc */
+static void play_beep_ex(int16_t* buf, int N, int sample_rate)
+{
+    /* Canon asserts on cacheable buffers that are not 32-byte aligned,
+     * and on addresses from 0xC0000000 */
+    if ((uint32_t) buf < 0x40000000 || (uint32_t) buf >= 0xC0000000)
+        return;
+    if (sample_rate != 48000 && sample_rate != 24000)
+        return;
+    if (!MEM(SE_BEEP_OBJ))
+        return;
+
+    struct se_beep_req req = {
+        .kind       = 1,
+        .pcm        = buf,
+        .pcm_size   = N * 2,
+        .rate_khz   = sample_rate / 1000,
+        .bits       = 16,
+        .channels   = 1,
+    };
+
+    beep_playing = 1;
+    SE_PlayPWMWait(1);
+    SE_BeepStart(0, &req);
+
+    int timeout = N * 1000 / sample_rate + 1000;  /* ms */
+    while (!se_pcm_idle() && timeout > 0)
+    {
+        msleep(20);
+        timeout -= 20;
+    }
+    if (!se_pcm_idle())
+    {
+        SE_BeepStop(1);
+    }
+    beep_playing = 0;
+}
+
+static void play_beep(int16_t* buf, int N)
+{
+    play_beep_ex(buf, N, 48000);
+}
+
+/* the PCM channel needs DMA memory */
+#define beep_buf_alloc fio_malloc
+#define beep_buf_free  fio_free
+
+#else /* ASIF */
 
 static void asif_stopped_cbr()
 {
@@ -105,20 +223,25 @@ static void play_beep_ex(int16_t* buf, int N, int sample_rate)
     StartASIFDMADAC(buf, N, 0, 0, asif_stop_cbr, 0);
 }
 
-static void normalize_audio(int16_t* buf, int N)
-{
-    int m = 0;
-    for (int i = 0; i < N/2; i++)
-        m = MAX(m, ABS(buf[i]));
-    
-    for (int i = 0; i < N/2; i++)
-        buf[i] = (int)buf[i] * 32767 / m;
-}
+#define beep_buf_alloc malloc
+#define beep_buf_free  free
+
+#endif /* CONFIG_BEEP_SE */
 
 #ifdef FEATURE_WAV_RECORDING
     #ifndef FEATURE_BEEP
     #error This requires FEATURE_BEEP.
     #endif
+
+static void normalize_audio(int16_t* buf, int N)
+{
+    int m = 0;
+    for (int i = 0; i < N/2; i++)
+        m = MAX(m, ABS(buf[i]));
+
+    for (int i = 0; i < N/2; i++)
+        buf[i] = (int)buf[i] * 32767 / m;
+}
 
 // https://ccrma.stanford.edu/courses/422/projects/WaveFormat/
 // http://www.sonicspot.com/guide/wavefiles.html
@@ -551,6 +674,12 @@ static void generate_beep_tone(int16_t* buf, int N, int freq, int wavetype)
                 break;
             }
         }
+
+        #ifdef CONFIG_BEEP_SE
+        /* no volume control on the SE path: "Speaker Volume" scales the
+         * samples (here, not at playback: the N-beeps path replays a buffer) */
+        buf[i] = (int) buf[i] * COERCE(beep_volume, 1, ASIF_MAX_VOL) / ASIF_MAX_VOL;
+        #endif
     }
 }
 
@@ -574,7 +703,7 @@ static void play_test_tone()
 
 void unsafe_beep()
 {
-    if (!beep_enabled)
+    if (!BEEPS_ON())
     {
         info_led_blink(1,50,50); // silent warning
         return;
@@ -598,7 +727,7 @@ void unsafe_beep()
 
 void beep_times(int times)
 {
-    if (!beep_enabled || !is_safe_to_beep())
+    if (!BEEPS_ON() || !is_safe_to_beep())
     {
         info_led_blink(times,50,50); // silent warning
         return;
@@ -624,7 +753,7 @@ void beep()
 
 void beep_custom(int duration, int frequency, int wait)
 {
-    if (!beep_enabled || !is_safe_to_beep())
+    if (!BEEPS_ON() || !is_safe_to_beep())
     {
         info_led_blink(1, duration, 10); // silent warning
         return;
@@ -701,41 +830,41 @@ static void beep_task()
         {
             info_led_on();
             int N = 48000*5;
-            int16_t* beep_buf = malloc(N*2);
-            if (!beep_buf) { N = 48000; beep_buf = malloc(N*2); } // not enough RAM, try a shorter tone
-            if (!beep_buf) { N = 10000; beep_buf = malloc(N*2); } // even shorter
+            int16_t* beep_buf = beep_buf_alloc(N*2);
+            if (!beep_buf) { N = 48000; beep_buf = beep_buf_alloc(N*2); } // not enough RAM, try a shorter tone
+            if (!beep_buf) { N = 10000; beep_buf = beep_buf_alloc(N*2); } // even shorter
             if (!beep_buf) continue; // give up
             generate_beep_tone(beep_buf, N, beep_freq_values[beep_freq_idx], beep_wavetype);
             play_beep(beep_buf, N);
             while (beep_playing) msleep(100);
-            free(beep_buf);
+            beep_buf_free(beep_buf);
             info_led_off();
         }
         else if (beep_type == BEEP_SHORT)
         {
             int N = 5000;
-            int16_t* beep_buf = malloc(N*2);
+            int16_t* beep_buf = beep_buf_alloc(N*2);
             if (!beep_buf) continue; // give up
             generate_beep_tone(beep_buf, 5000, beep_freq_values[beep_freq_idx], beep_wavetype);
             play_beep(beep_buf, 5000);
             while (beep_playing) msleep(20);
-            free(beep_buf);
+            beep_buf_free(beep_buf);
         }
         else if (beep_type == BEEP_CUSTOM_LEN_FREQ)
         {
             int N = beep_custom_duration * 48;
-            int16_t* beep_buf = malloc(N*2);
+            int16_t* beep_buf = beep_buf_alloc(N*2);
             if (!beep_buf) continue; // give up
             generate_beep_tone(beep_buf, N, beep_custom_frequency, 0);
             play_beep(beep_buf, N);
             while (beep_playing) msleep(20);
-            free(beep_buf);
+            beep_buf_free(beep_buf);
         }
         else if (beep_type > 0) // N beeps
         {
             int times = beep_type;
             int N = 10000;
-            int16_t* beep_buf = malloc(N*2);
+            int16_t* beep_buf = beep_buf_alloc(N*2);
             if (!beep_buf) continue;
             generate_beep_tone(beep_buf, N, beep_freq_values[beep_freq_idx], beep_wavetype);
             
@@ -751,8 +880,8 @@ static void beep_task()
                 while (beep_playing) msleep(20);
                 msleep(120);
             }
-            
-            free(beep_buf);
+
+            beep_buf_free(beep_buf);
         }
         msleep(100);
         audio_configure(1);
@@ -998,6 +1127,12 @@ static MENU_UPDATE_FUNC(beep_update)
     {
         MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Beeps disabled to prevent interference with audio recording.");
     }
+    #ifdef CONFIG_BEEP_SE
+    else if (beep_enabled && !canon_beep_enabled)
+    {
+        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Beep is disabled in Canon menu: ML beeps are silent too.");
+    }
+    #endif
 }
 
 static struct menu_entry beep_menus[] = {

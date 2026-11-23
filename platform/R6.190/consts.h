@@ -176,6 +176,13 @@
  */
 #define LV_OVERLAYS_MODE MEM(0x20F70)
 
+/* Beeps (CONFIG_BEEP_SE, src/beep.c). "Speaker Volume" 1..5 scales the
+ * samples. SE_BEEP_OBJ: pointer to Canon's sound-effect object, set by
+ * SE_Initialize 0xE085DFB4; +0x48 PCM channel state, 3 = idle
+ * (SE_PlayPWMWait 0xE085E380 polls it). */
+#define ASIF_MAX_VOL 5
+#define SE_BEEP_OBJ  0xE628
+
 // AeProcessSetting 0xE0725E9A; ISOMin via " >> ISOMin:%d" (LVAE_STRUCT - 0x48, as on R5)
 #define LVAE_ISO_STRUCT 0x1202EC
 #define LVAE_ISO_MIN    (*(uint8_t* )LVAE_ISO_STRUCT + 0x0E ) // via string: ISOMin:%d
