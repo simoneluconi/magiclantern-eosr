@@ -62,8 +62,8 @@
 #define CONFIG_NO_DEDICATED_MOVIE_MODE
 
 /** Canon's "REC" indicator is drawn at the top right of the screen, in
- * ML's LiveView top bar (seen on camera, movie mode): keep that place
- * free while recording (src/lens.c, free_space_update). */
+ * ML's LiveView top bar (seen on camera, movie mode): keep that corner
+ * empty in movie mode (src/lens.c, rec_indicator_space_update). */
 #define CONFIG_REC_INDICATOR_IN_TOP_BAR
 
 /** PROP_BATTERY_POWER holds Canon's CCAPI battery levels, not 0/1/2 bars:

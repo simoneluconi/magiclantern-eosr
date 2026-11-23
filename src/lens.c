@@ -3316,13 +3316,6 @@ static LVINFO_UPDATE_FUNC(free_space_update)
     if (RECORDING)
     {
         /* leave space for the recording indicators */
-        #ifdef CONFIG_REC_INDICATOR_IN_TOP_BAR
-        /* Canon's own REC indicator is drawn where this item is, at the
-         * right end of the top bar: keep the item, blank, so that no
-         * other item moves there (transparent background, Canon's
-         * indicator stays visible) */
-        snprintf(buffer, sizeof(buffer), "%7s", "");
-        #endif
         return;
     }
 
@@ -3338,6 +3331,23 @@ static LVINFO_UPDATE_FUNC(free_space_update)
         fsgf
     );
 }
+
+#ifdef CONFIG_REC_INDICATOR_IN_TOP_BAR
+/* Canon draws its REC indicator at the right end of the top bar, in the
+ * layer ML draws into (seen on camera; about x = 635..710 of 720).
+ * In movie mode, keep that corner empty, recording or not: an item there
+ * got under REC, and the pixels ML drew there before recording, erased
+ * once REC was on, left black holes in it (seen on camera). This item
+ * takes a fixed width at the right end and draws nothing. */
+static LVINFO_UPDATE_FUNC(rec_indicator_space_update)
+{
+    if (!is_movie_mode())
+        return;
+
+    item->custom_drawing = 1;
+    item->width = 90;
+}
+#endif
 
 static LVINFO_UPDATE_FUNC(mode_update)
 {
@@ -3738,6 +3748,16 @@ static struct lvinfo_item info_items[] = {
         .which_bar = LV_TOP_BAR_ONLY,
         .update = free_space_update,
     },
+    #ifdef CONFIG_REC_INDICATOR_IN_TOP_BAR
+    {
+        .name = "REC indicator",
+        .which_bar = LV_TOP_BAR_ONLY,
+        .update = rec_indicator_space_update,
+        .preferred_position = 127,
+        /* in a full bar, hide other items first (the clock goes first) */
+        .priority = 2,
+    },
+    #endif
     /* Bottom bar */
     {
         .name = "Mode",
