@@ -72,8 +72,9 @@ static const struct og_cell og_sensor_cells[] =
 #define OG_TIMING_TABLE 0x42BAA11C
 #define OG_TCELL(off, col)  (OG_TIMING_TABLE + (off) + 15 * 0x20 + 2 * (col))
 #define OG_TCART(col)       (OG_TIMING_TABLE + 0x1180 + 15 * 0x40 + 4 * (col))
-/* fps100 = PROP_VIDEO_MODE buf[2] (fps x 100 on DIGIC X, src/propvalues.c). Column 4 also
- * serves 24.00p, which needs FL 2147: refused (DESIGN.md 3.2) */
+/* fps100 = Canon's exact rate x 100 (PROP_MOVIE_CONTROL_PARAM word 1). 24.00p is its own
+ * fps index 9 (column 9, zero in the stock table, 60.00 Hz base sync; fps24/FPS24.md), not
+ * column 4: not supported (2400 is no rate here, and the live check refuses column 9) */
 struct og_rate { uint8_t col; const char * name; uint16_t fl_stock, fl, rps_stock, rps, fps100; };
 static const struct og_rate og_rates[] =
 {
