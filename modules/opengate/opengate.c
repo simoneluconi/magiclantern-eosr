@@ -199,7 +199,7 @@ static int og_alloc_copies(void)
  * ------------------------------------------------------------------------ */
 
 #define OG_MAX_RAM 128
-#define OG_MAX_ROM 64
+#define OG_MAX_ROM 96           /* 63 in use; og_apply_rom keeps 3 arrays of this on the 12 KB task stack */
 struct og_ramw { uint32_t addr; uint8_t size, deferred; uint32_t stock, val; };
 static struct og_ramw og_ram[OG_MAX_RAM];
 static int og_n_ram;

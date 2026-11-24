@@ -238,6 +238,21 @@ static const struct og_word og_enc_words[] =
     { 0xE1F1E924, 170000, 215000, 0, "OG enc kbps 24p IPB" },
     { 0xE1F1E94C, 51, 61, 0, "OG enc level 24p IPB Light" },
     { 0xE1F1E954, 85000, 108000, 0, "OG enc kbps 24p IPB Light" },
+    /* H.264 8-bit UHD rows (Canon Log off; audit/enc2736/h264_check.py), same group: level
+     * 5.1 -> 6.1 (5.1 allows 36,864 macroblocks per frame, 4096x2736 has 43,776; 61 is the
+     * code of Canon's own H.264 ALL-I rows); IPB bitrate x 1.267 as for HEVC */
+    { 0xE1F1D26C, 51, 61, 0, "OG enc H.264 level 30p IPB" },
+    { 0xE1F1D274, 120000, 152000, 0, "OG enc H.264 kbps 30p IPB" },
+    { 0xE1F1D29C, 51, 61, 0, "OG enc H.264 level 25p IPB" },
+    { 0xE1F1D2A4, 120000, 152000, 0, "OG enc H.264 kbps 25p IPB" },
+    { 0xE1F1D2CC, 51, 61, 0, "OG enc H.264 level 30p IPB Light" },
+    { 0xE1F1D2D4, 60000, 76000, 0, "OG enc H.264 kbps 30p IPB Light" },
+    { 0xE1F1D2FC, 51, 61, 0, "OG enc H.264 level 25p IPB Light" },
+    { 0xE1F1D304, 60000, 76000, 0, "OG enc H.264 kbps 25p IPB Light" },
+    { 0xE1F1D35C, 51, 61, 0, "OG enc H.264 level 24p IPB" },
+    { 0xE1F1D364, 120000, 152000, 0, "OG enc H.264 kbps 24p IPB" },
+    { 0xE1F1D38C, 51, 61, 0, "OG enc H.264 level 24p IPB Light" },
+    { 0xE1F1D394, 60000, 76000, 0, "OG enc H.264 kbps 24p IPB Light" },
 };
 
 /* runtime MMU pages: E0130000 E0320000 E0360000 E0370000 E0380000 E0390000 E03B0000
