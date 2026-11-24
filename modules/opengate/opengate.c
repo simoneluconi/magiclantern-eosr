@@ -666,8 +666,130 @@ static int og_player_apply(void)
     return 1;
 }
 
+/* ------------------------------------------------------------------------
+ * player diagnostics (player option + debug log): Canon's own DebugMsg ring copied to the
+ * card while playback runs, to see where a 4096x2736 preview stops (PLAYER-2736.md 9.2).
+ * No patch: the ring is in RAM, written by Canon; the module only lowers the store level
+ * of the player's classes (one byte each, restored when the player words go) and writes
+ * the ring memory to ML/LOGS/OGDM0.BIN / OGDM1.BIN every 2 s, alternately.
+ * ------------------------------------------------------------------------ */
+
+#define RD8(a) (*(volatile uint8_t *)(a))
+#define OG_DM_PTR      0x52A8           /* S, DryosDebugMsg state (literal E07DA598) */
+#define OG_DM_S_LEN    0x348
+#define OG_DM_MAGIC    0x4157554B       /* "KUWA" ring handle */
+#define OG_DM_SLOT     0x54
+#define OG_DM_PERIOD   2000
+#define OG_DM_TIME     240000           /* the GUI waits 200 s for the preview */
+#define OG_DM_NCLS     6
+
+static uint8_t og_dm_cls[OG_DM_NCLS], og_dm_saved[OG_DM_NCLS];
+static int og_dm_ncls;
+static int og_dm_play_since, og_dm_last, og_dm_file;
+
+static uint32_t og_dm_s(void)
+{
+    uint32_t s = og_rd(OG_DM_PTR);
+    return og_ram_ok(s, OG_DM_S_LEN) && og_rd(s + 0x0C) ? s : 0;
+}
+
+/* lower the store level of one class to 1 (all levels kept), once, saving the old byte */
+static void og_dm_class(uint32_t s, int c)
+{
+    if (c <= 0 || c > 0xFE || og_dm_ncls >= OG_DM_NCLS) return;
+    for (int i = 0; i < og_dm_ncls; i++) if (og_dm_cls[i] == c) return;
+    uint32_t a = s + 3 * c + 0x38;
+    og_dm_cls[og_dm_ncls] = c;
+    og_dm_saved[og_dm_ncls] = RD8(a);
+    og_dm_ncls++;
+    RD8(a) = 1;
+    og_log("dm: class %x store level %d -> 1", c, og_dm_saved[og_dm_ncls - 1]);
+}
+
+/* the player's classes (PLAYER-2736.md 9.4); their pointers are 0 until the player starts */
+static void og_dm_arm(void)
+{
+    uint32_t s = og_dm_s();
+    if (!s) return;
+    og_dm_class(s, 0x1F);
+    uint32_t p;
+    if ((p = og_rd(0x9D48)) && og_ram_ok(p & ~3, 8)) og_dm_class(s, RD8(p + 4));
+    og_dm_class(s, RD8(0x243E4));
+    if ((p = og_rd(0x243EC)) && og_ram_ok(p & ~3, 4)) og_dm_class(s, RD8(p));
+    if ((p = og_rd(0x3754C)) && og_ram_ok(p & ~3, 0x24)) og_dm_class(s, RD8(p + 0x20));
+    if ((p = og_rd(0x3755C)) && og_ram_ok(p & ~3, 4)) og_dm_class(s, RD8(p));
+}
+
+static void og_dm_restore(void)
+{
+    uint32_t s = og_dm_s();
+    for (int i = 0; s && i < og_dm_ncls; i++) RD8(s + 3 * og_dm_cls[i] + 0x38) = og_dm_saved[i];
+    og_dm_ncls = 0;
+}
+
+/* a ring handle and its length, or 0 */
+static uint32_t og_dm_ring(uint32_t s, int k, uint32_t * len)
+{
+    uint32_t h = og_rd(s + 0x10 + 4 * k);
+    if (!og_ram_ok(h, 0x80) || og_rd(h) != OG_DM_MAGIC) return 0;
+    uint32_t n = 0;
+    for (int sub = 0; sub < 2; sub++)
+    {
+        uint32_t off = og_rd(h + 4 * (2 + 15 * sub)), cnt = og_rd(h + 4 * (4 + 15 * sub));
+        if (off < 0x80 || off > 0x100000 || cnt > 0x4000) return 0;
+        n = MAX(n, off + cnt * OG_DM_SLOT);
+    }
+    if (!og_ram_ok(h, n)) return 0;
+    *len = n;
+    return h;
+}
+
+static void og_dm_dump(void)
+{
+    uint32_t s = og_dm_s();
+    if (!s) return;
+    uint32_t h[3], n[3], nb = 1;
+    for (int k = 0; k < 3; k++) { h[k] = og_dm_ring(s, k, &n[k]); if (h[k]) nb++; }
+    char name[32];
+    snprintf(name, sizeof(name), "ML/LOGS/OGDM%d.BIN", og_dm_file);
+    og_dm_file ^= 1;
+    FILE * f = FIO_CreateFile(name);
+    if (!f) return;
+    uint32_t hdr[4] = { 0x4D44474F, 1, s, nb };    /* "OGDM", version, S, blocks */
+    FIO_WriteFile(f, hdr, sizeof(hdr));
+    uint32_t b[2] = { s, OG_DM_S_LEN };
+    FIO_WriteFile(f, b, sizeof(b));
+    FIO_WriteFile(f, (void *) s, OG_DM_S_LEN);
+    for (int k = 0; k < 3; k++)
+    {
+        if (!h[k]) continue;
+        b[0] = h[k]; b[1] = n[k];
+        FIO_WriteFile(f, b, sizeof(b));
+        FIO_WriteFile(f, (void *) h[k], n[k]);
+    }
+    FIO_CloseFile(f);
+    /* writes since boot of each sub-ring: if they stop, Canon itself stopped logging */
+    og_log("dm %s: rings %x %x %x, writes %d/%d %d/%d %d/%d", name, h[0], h[1], h[2],
+           h[0] ? og_rd(h[0] + 24) : 0, h[0] ? og_rd(h[0] + 84) : 0,
+           h[1] ? og_rd(h[1] + 24) : 0, h[1] ? og_rd(h[1] + 84) : 0,
+           h[2] ? og_rd(h[2] + 24) : 0, h[2] ? og_rd(h[2] + 84) : 0);
+}
+
+static void og_dm_step(void)
+{
+    if (!og_player_in || !og_debug) { og_dm_play_since = 0; return; }
+    og_dm_arm();                        /* polls for the player's class pointers */
+    if (!is_play_or_qr_mode()) { og_dm_play_since = 0; return; }
+    int now = get_ms_clock();
+    if (!og_dm_play_since) { og_dm_play_since = now; og_dm_last = now - OG_DM_PERIOD; }
+    if (now - og_dm_play_since > OG_DM_TIME || now - og_dm_last < OG_DM_PERIOD) return;
+    og_dm_last = now;
+    og_dm_dump();
+}
+
 static void og_player_remove(void)
 {
+    og_dm_restore();
     for (int i = COUNT(og_player_words) - 1; i >= 0; i--)
     {
         int e = unpatch_memory(og_player_words[i].addr);
@@ -1115,6 +1237,7 @@ static void og_step(void)
     og_observe_setting();
     og_finish_deferred();
     og_player_step();
+    og_dm_step();
 
     switch (og_state)
     {
