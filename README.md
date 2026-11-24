@@ -1,144 +1,78 @@
-Magic Lantern for the Canon EOS R6 (firmware 1.9.0) - unofficial fork
-=====================================================================
+Magic Lantern for the Canon EOS R6
+==================================
 
-> **Unofficial, experimental, use at your own risk.**
->
-> - This is **not** an official Magic Lantern release. It is not affiliated with, reviewed
->   or endorsed by the Magic Lantern team. Please don't report problems with it to them.
-> - Most of the R6-specific code was **written with the help of AI (LLMs)**. It started
->   from andrewpoison's LLM-assisted R6 port and was then cleaned up and extended with
->   Claude (Anthropic). Every such commit says so in its message. Magic Lantern does not
->   accept AI-generated code, so none of this is meant for, or will be submitted to,
->   the official project.
-> - It has been tested on **one** camera. It comes with **no warranty** (see the GPL in
->   [`COPYING`](COPYING)). Keep a way to pull the battery quickly, and don't use it for
->   work that matters.
+**Open gate 4K, true 24.00p, one-hour clips and more, on the original EOS R6 (firmware 1.9.0).**
 
-Magic Lantern (ML) is an independent program that runs alongside Canon's own firmware.
-It is loaded from the memory card each time the camera starts; Canon's firmware itself is
-not modified. This fork adds support for the original **EOS R6 (Mark I)** on firmware
-**1.9.0**, plus a few features the R6 does not have by itself.
+Magic Lantern (ML) runs next to Canon's firmware, straight from the memory card: nothing in the
+camera is changed, and a card without ML starts the camera as usual. This unofficial fork brings
+it to the R6 and adds video features that Canon never shipped.
 
-## Supported camera
+> **Experimental and unofficial.** It is not an official Magic Lantern release and not endorsed by
+> the ML team, so please report problems here, not to them. The R6 code was written with the help
+> of AI (it started from andrewpoison's LLM-assisted port and was extended with Claude), and every
+> such commit says so. It has been tested on one camera, comes with no warranty (GPL, see
+> [`COPYING`](COPYING)), and is not for work that matters yet.
 
-| Camera | Firmware | State |
+## What's new on the R6
+
+| | Feature | What you get |
 |---|---|---|
-| Canon EOS R6 (Mark I) | **1.9.0** | supported (experimental) |
-| Canon EOS R6, any other firmware | - | **not supported**: ML checks the firmware signature and refuses to start |
-| Canon EOS R6 Mark II, other models | - | **not supported** by this fork |
+| 🎞️ | **Open gate 4K** | Record the **whole sensor height**: 4096x2736 (3:2) instead of 3840x2160. Reframe for vertical or square later. HEVC 4:2:2 10-bit with Canon Log, or H.264. 25p, 29.97p, 23.98p. Play the clips on a computer. *Module, experimental.* |
+| 🎬 | **True 24.00p** | Real cinema 24.00 fps in 4K UHD, not 23.98. The R6 firmware hides Canon's own 24.00p setting; ML brings it back. *Module, experimental.* |
+| ⏱️ | **Clips up to 59:59** | No more 29:59 stop. A 60-minute clip records, and plays back on the camera. |
+| 🌡️ | **Heat timer 2x / 3x / 4x** | Slows Canon's time-based 4K limit. The real temperature sensors still protect the camera. |
+| 💾 | **Format and keep ML** | Format the card from Canon's menu and ML is put back for you ("Format card, keep ML"). |
+| 🖼️ | **Cropmarks** | Framing guides on the LiveView, including your own bitmaps. |
 
-The rest of the code base still builds for the other cameras Magic Lantern supports, but
-this fork is only maintained and tested for the R6.
+The modules sit in the **Modules** tab and turn on from the ML menu; open gate and 24.00p are
+used one at a time. Their limits are in their own info screen on the camera.
 
-## What works
+## Also included
 
-| Feature | Where | State |
-|---|---|---|
-| Loading ML from the card (slot 1 or 2, FAT32 or exFAT), ML menu, saving settings | Trash button opens the menu | works |
-| ML menu while recording; the dials only move the menu, not the exposure | Trash button while recording | works |
-| **Clip length up to 59:59** instead of 29:59 (Canon's movie writer and player are patched too) | Movie > MOV/MP4 time limit | works, a 60 min clip records and plays back on the camera |
-| **Heat timer** 2x / 3x / 4x: slows Canon's time-based 4K heat limit; the temperature sensors still protect the camera | Movie > Heat timer | works |
-| Temperatures, heat timer and budget, in °C or °F | Debug > Internal Temp, LiveView top bar | works |
-| Battery charge in % | LiveView bottom bar, Debug > Battery level | works |
-| ML beeps with ML's own tone (pitch, waveform, volume), unlike Canon's beeps | Audio > Beep, test tones | works |
-| Spotmeter, false color, waveform, vectorscope | Overlay | works in photo and movie mode, also while recording (rear screen) |
-| Modules: **Lua scripts** and the file manager | Modules, Scripts, Debug > File Manager | works (example scripts tested) |
-| Red display for night / astro, ML colour schemes incl. "Pure Red" | Display | works |
-| Motion detect (pictures through Canon's own shutter path) | Shoot > Motion Detect | works |
-| Lens info, depth of field, auto exposure values | Focus, Expo | works |
-| Screenshots of ML's graphics and the LiveView image | Debug > Screenshot | works |
-| File transfer over USB (PTP), on builds compiled with PTP | see [USB-PTP](docs/r6/USB-PTP.md) | works, advanced |
+- **Spotmeter, false color, waveform and vectorscope**, in photo and movie mode, also while recording.
+- **Temperatures and the heat timer** in the LiveView bar, **battery in %**.
+- **ML menu while recording**: the dials move the menu, not your exposure.
+- **Red display** for night and astro, motion detect, screenshots, Lua scripts, file manager.
+- **USB file transfer** (PTP) on builds that enable it.
 
-## What does not work (yet)
+Zebras, focus peaking, the histogram, the intervalometer and the bulb timer are left to Canon,
+which already does them well. Not available yet: RAW / MLV video, dual ISO, silent pictures, and
+Lua scripts that change camera settings.
 
-- **Trimming long clips on the camera**: clips over 30 minutes play back on the camera, but Canon's movie editor keeps its own limits.
-- **Other modules** (dual ISO, MLV / RAW video, silent pictures...) are not included: they need parts of ML that don't exist yet on DIGIC X.
-- **Lua scripts that change camera settings** (exposure, shooting) fail: the R6 build does not allow property writes.
-- In the viewfinder, ML's bars and overlays show only on Canon's first ("empty") INFO screen, and Canon's own info can leave gaps in ML's bars.
-- Zebras, focus peaking, histogram, intervalometer and bulb timer are **not enabled on purpose**: the R6 has its own.
+## Getting started
 
-## Documentation
+Your camera must be on firmware **1.9.0** (Canon menu > Setup > Firmware). Any other firmware:
+ML refuses to start.
 
-1. [Installing and starting ML](docs/r6/INSTALL.md): boot flag, preparing the card, first start
-2. [Using ML](docs/r6/USAGE.md): controls, settings, every feature listed above, updating
-3. [Troubleshooting](docs/r6/TROUBLESHOOTING.md): the camera hangs, freezes or shows errors
-4. [Overheat protection and the 29:59 limit](docs/r6/OVERHEAT.md): how they work and what the ML options change
-5. [USB / PTP file transfer](docs/r6/USB-PTP.md): advanced
+1. **Turn on the boot flag**, once, with the script in [`tools/r6/bootflag-enable/`](tools/r6/bootflag-enable/)
+   (an SDHC card of 32 GB or less, in slot 2).
+2. **Prepare the card**: format it in the camera, unzip `magiclantern.zip` to it, and set the card
+   flags with the tools in [`tools/r6/`](tools/r6/).
+3. **Power on** and press the **Trash** button: that's the ML menu.
 
-## Installing, in short
+The full walkthrough is in [INSTALL](docs/r6/INSTALL.md).
 
-Read [INSTALL](docs/r6/INSTALL.md) first; this is only an overview.
+## Guides
 
-1. Check that the camera is on firmware **1.9.0** (Canon menu > Setup > Firmware).
-2. **Turn on the camera's boot flag once**, with the Canon Basic script in
-   [`tools/r6/bootflag-enable/`](tools/r6/bootflag-enable/). It runs from an SDHC card of 32 GB or less, in slot 2.
-   It checks the firmware signature first. [`tools/r6/bootflag-disable/`](tools/r6/bootflag-disable/) turns the flag off again.
-3. **Prepare an ML card**: format it in the camera, unzip `magiclantern.zip` to the card root, and set the
-   `EOS_DEVELOP` and `BOOTDISK` flags with [`tools/card-flags/edit_card_flags.py`](tools/card-flags/edit_card_flags.py)
-   (Linux) or the scripts in [`tools/r6/`](tools/r6/) (Windows).
-4. Insert the card and power on. The **Trash** button opens the ML menu.
+- [Installing](docs/r6/INSTALL.md)
+- [Using ML on the R6](docs/r6/USAGE.md): buttons, every feature, updating
+- [Troubleshooting](docs/r6/TROUBLESHOOTING.md)
+- [Overheating and the 29:59 limit](docs/r6/OVERHEAT.md)
+- [USB / PTP transfer](docs/r6/USB-PTP.md)
 
-A card without the ML flags still boots the camera normally. Formatting the ML card in the camera
-removes ML and its flags.
+On the camera, press **INFO** on a menu entry for its help page.
 
-## Building from source
+## Problems and ideas
 
-Builds are done on Linux (WSL works). You need:
+Open an issue in this repository. Say which build you used and what you did step by step. If the
+camera hung, say how it came back (battery pull, card out).
 
-- the [Arm GNU Toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads) for
-  `arm-none-eabi` (12.3 was used), `make`, `python3` and `zip`;
-- a checkout with Unix line endings. On Windows, clone inside WSL, or set `core.autocrlf=false`
-  before cloning.
+## Thanks
 
-```sh
-cd platform/R6.190
-make ARM_BINPATH=/path/to/arm-gnu-toolchain/bin             # build/autoexec.bin, build/magiclantern.zip
-make ARM_BINPATH=... CONFIG_PTP=y CONFIG_PTP_CHDK=y         # same, with USB file transfer
-```
+- The **Magic Lantern** developers, for ML and the DIGIC X groundwork: [magiclantern.fm](https://www.magiclantern.fm/)
+- **andrewpoison**, for the first R6 1.9.0 port
+- **lclevy**, for the [Canon Basic examples](https://github.com/lclevy/cbasic_examples) behind the boot flag scripts
+- The **CHDK** project, for the PTP protocol and `ptpcam`
 
-`magiclantern.zip` contains `autoexec.bin` and the `ML/` folder. Always copy `autoexec.bin` and
-`ML/modules/R6_190.sym` from the same build.
-
-The platform build packs the modules listed in `platform/R6.190/modules.included` (`file_man`, `lua`)
-but does not rebuild them if they already exist. After changing module code, rebuild it with
-`make -C modules/lua ARM_BINPATH=...` and use `modules/lua/build/lua.mo`.
-
-The R6 work is on the branch `r6.190-clean`. Its R6-specific code is mostly in `platform/R6.190/`,
-plus generic changes in `src/` that other cameras can opt into (for example
-`CONFIG_MMU_RUNTIME_PAGES`, `MVR_WRITER_PATCHES`, `CONFIG_REC_INDICATOR_IN_TOP_BAR`).
-Commit messages explain the reverse-engineering behind each change, with firmware addresses.
-
-## No Canon code
-
-This repository contains **no Canon firmware, ROM dumps or decompiled Canon code**: only
-addresses and descriptions of what the firmware does, as in every Magic Lantern port. Please
-don't attach ROM dumps to issues or merge requests.
-
-## Reporting problems
-
-Open an issue in **this** repository. Say which build you used and what you did, step by step:
-mode, menu item, card, and whether USB was connected. If the camera hung, say how it recovered
-(battery pull, card removed).
-
-## Credits
-
-- The **Magic Lantern** developers and contributors, for Magic Lantern itself and the DIGIC 6/7/8/X work
-  this builds on: [magiclantern.fm](https://www.magiclantern.fm/).
-- **andrewpoison**, for the first R6 1.9.0 port, shared in the R5/R6 thread on the Magic Lantern forum.
-- **lclevy**'s [Canon Basic examples](https://github.com/lclevy/cbasic_examples), the base of the boot flag scripts.
-- The **CHDK** project, whose PTP protocol and `ptpcam` are used for USB transfer.
-
-## License
-
-GPL v2, like Magic Lantern: see [`COPYING`](COPYING). Canon, EOS and related names are trademarks
-of Canon Inc.; this project is not affiliated with Canon.
-
----
-
-### About upstream Magic Lantern
-
-Magic Lantern is an open framework, licensed under GPL, for developing extensions to Canon's
-official firmware. It is developed by photo and video enthusiasts and adds features such as HDR
-images and video, timelapse, motion detection, focus assist tools and manual audio controls.
-See [magiclantern.fm](https://www.magiclantern.fm/). The ML team also maintains a patched QEMU for
-emulating camera ROMs: [qemu-eos](https://github.com/reticulatedpines/qemu-eos).
+GPL v2, like Magic Lantern. Canon and EOS are trademarks of Canon Inc.; this project is not
+affiliated with Canon.
