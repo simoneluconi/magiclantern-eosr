@@ -996,6 +996,16 @@ MODULE_INFO_START()
     MODULE_DEINIT(og_deinit)
 MODULE_INFO_END()
 
+/* saved by ML in ML/SETTINGS when the menu closes; the entry itself is not saved (OFF at boot) */
+MODULE_CONFIGS_START()
+    MODULE_CONFIG(og_debug)
+    MODULE_CONFIG(og_saved_col)
+    MODULE_CONFIG(og_saved_vm0)
+    MODULE_CONFIG(og_saved_vm1)
+    MODULE_CONFIG(og_saved_vm2)
+    MODULE_CONFIG(og_saved_vm_ok)
+MODULE_CONFIGS_END()
+
 MODULE_PROPHANDLERS_START()
     MODULE_PROPHANDLER(PROP_VIDEO_MODE)
     MODULE_PROPHANDLER(PROP_HDMI_CHANGE)
