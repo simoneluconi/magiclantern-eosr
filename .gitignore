@@ -91,6 +91,8 @@ developer_guide/developer_guide.pdf
 *.cr2
 *.DAT
 !platform/*/doc/menuidx.dat
+# README and guide images
+!docs/r6/img/*.jpg
 ML/SETTINGS/
 BOOTFLAG.TXT
 

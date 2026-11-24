@@ -6,6 +6,9 @@ Magic Lantern for the Canon EOS R6
 Magic Lantern (ML) runs next to Canon's firmware, straight from the memory card. This unofficial
 fork brings it to the R6, with extra video features.
 
+<p align="center"><img src="docs/r6/img/open-gate-frame.jpg" alt="An open gate 4K frame from the R6, 4096x2736, with 16:9, 1:1 and 9:16 framings inside it" width="800"><br>
+<em>One open gate frame from the R6: 4096x2736, with room for 16:9, 1:1 and 9:16.</em></p>
+
 > **Experimental and unofficial.** It is not an official Magic Lantern release and not endorsed by
 > the ML team, so please report problems here, not to them. The R6 code was written with the help
 > of AI (it started from andrewpoison's LLM-assisted port and was extended with Claude), and every
