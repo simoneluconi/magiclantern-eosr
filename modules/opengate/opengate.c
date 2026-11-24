@@ -38,6 +38,15 @@
 /* src/patch_mmu.h (not included by patch.h for modules) */
 extern int mmu_reserve_pages_for_patches(const struct patch * patches, uint32_t count);
 #define OG_E_NO_PAGES 0x10000           /* not an E_PATCH_* code: the reservation failed */
+/* Canon's AllocateMemory pool (src/mem.c): the runtime MMU pages come from it */
+extern int GetMemoryInformation(int * total, int * free);
+
+static int og_mem_free(void)
+{
+    int total = 0, free = 0;
+    GetMemoryInformation(&total, &free);
+    return free;
+}
 
 #define RD32(a) (*(volatile uint32_t *)(a))
 #define RD16(a) (*(volatile uint16_t *)(a))
@@ -304,8 +313,12 @@ static int og_apply_rom(void)
      * run 42) and keeps what it added if one fails */
     if (!err)
     {
+        int mem0 = og_mem_free();
         int e = mmu_reserve_pages_for_patches(p, np);
-        og_log("mmu_reserve_pages_for_patches(%d) = %d", np, e);
+        int mem1 = og_mem_free();
+        /* free memory unchanged: no page added (all reused) */
+        og_log("mmu_reserve_pages_for_patches(%d) = %d, AllocateMemory free %d -> %d (%d)",
+               np, e, mem0, mem1, mem1 - mem0);
         if (e) err = OG_E_NO_PAGES;
     }
     if (!err) err = apply_patches(p, np);   /* copies the arrays; all or nothing */

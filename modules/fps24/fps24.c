@@ -38,6 +38,32 @@
 
 /* src/patch_mmu.c (not declared in patch.h for modules) */
 extern int mmu_reserve_pages_for_patches(const struct patch * patches, uint32_t count);
+/* Canon's AllocateMemory pool (src/mem.c): the runtime MMU pages come from it */
+extern int GetMemoryInformation(int * total, int * free);
+
+static int f24_mem_free(void)
+{
+    int total = 0, free = 0;
+    GetMemoryInformation(&total, &free);
+    return free;
+}
+
+/* ML/LOGS/FPS24.LOG: one line per apply / removal (task context only, rare) */
+static void f24_log(const char * fmt, ...)
+{
+    if (ml_shutdown_requested) return;
+    char buf[160];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = snprintf(buf, sizeof(buf), "%d ", get_ms_clock());
+    vsnprintf(buf + n, sizeof(buf) - n, fmt, ap);
+    va_end(ap);
+    FILE * f = FIO_CreateFileOrAppend("ML/LOGS/FPS24.LOG");
+    if (!f) return;
+    FIO_WriteFile(f, buf, strlen(buf));
+    FIO_WriteFile(f, "\n", 1);
+    FIO_CloseFile(f);
+}
 
 #define RD16(a) (*(volatile uint16_t *)(a))
 #define RD32(a) (*(volatile uint32_t *)(a))
@@ -211,12 +237,19 @@ static int f24_apply(void)
      * list (two calls would count the same free pages twice). Pages remapped before, by us
      * or another feature, are reused */
     p[np] = (struct patch) { .addr = (uint8_t *) f24_p6[0].addr, .size = 4 * COUNT(f24_p6) };
-    if (mmu_reserve_pages_for_patches(p, np + 1))
+    int mem0 = f24_mem_free();
+    int r = mmu_reserve_pages_for_patches(p, np + 1);
+    int mem1 = f24_mem_free();
+    /* free memory unchanged: no page added (all reused) */
+    f24_log("mmu_reserve_pages_for_patches(%d) = %d, AllocateMemory free %d -> %d (%d)",
+            np + 1, r, mem0, mem1, mem1 - mem0);
+    if (r)
     {
         f24_why = "Not enough memory for the patches";
         return 0;
     }
     int e = apply_patches(p, np);               /* copies the arrays; all or nothing */
+    f24_log("apply %d groups: %x", np, e);
     if (e)
     {
         f24_why = e & E_PATCH_TOO_MANY_PATCHES ? "Too many ML patches active"
@@ -245,7 +278,7 @@ static void f24_p6_step(void)
     if (!want)
     {
         int e = unpatch_memory(f24_p6[0].addr);
-        if (e) printf("fps24: unpatch P6: %x\n", e);
+        f24_log("P6 out: %x", e);
         f24_p6_in = 0;
         return;
     }
@@ -262,9 +295,11 @@ static void f24_p6_step(void)
     struct patch p = { .addr = (uint8_t *) f24_p6[0].addr, .old_values = (uint8_t *) f24_p6_buf[0],
                        .new_values = (uint8_t *) f24_p6_buf[1], .size = 4 * COUNT(f24_p6),
                        .is_instruction = 1, .description = f24_p6[0].what };
-    if (mmu_reserve_pages_for_patches(&p, 1)) { printf("fps24: P6: no MMU page\n"); return; }
-    int e = apply_patches(&p, 1);
-    if (e) { printf("fps24: P6 apply %x\n", e); return; }
+    int mem0 = f24_mem_free();
+    int r = mmu_reserve_pages_for_patches(&p, 1);
+    int e = r ? 0 : apply_patches(&p, 1);
+    f24_log("P6: reserve %d, AllocateMemory free %d -> %d, apply %x", r, mem0, f24_mem_free(), e);
+    if (r || e) return;
     f24_p6_in = 1;
 }
 
@@ -274,7 +309,7 @@ static void f24_remove(int from, int to)
     {
         if (!f24_g_in[g]) continue;
         int e = unpatch_memory(f24_groups[g].w[0].addr);
-        if (e) printf("fps24: unpatch %08x: %x\n", f24_groups[g].w[0].addr, e);
+        f24_log("remove group %d (%08x): %x", g, f24_groups[g].w[0].addr, e);
         f24_g_in[g] = 0;
     }
 }
