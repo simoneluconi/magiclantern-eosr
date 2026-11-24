@@ -77,6 +77,12 @@
 // Audio > Beep, test tones (src/beep.c, CONFIG_BEEP_SE in internals.h)
 #define FEATURE_BEEP
 
+// Canon menu > Format card keeps ML ("Format card, keep ML [INFO]"), as on
+// EOS R: ML's files are kept in RAM while the format dialog is open, written
+// back after the format, then the boot flags and a restart (src/debug.c).
+// Only for the card ML runs from. R6 values in consts.h / internals.h.
+#define CONFIG_RESTORE_AFTER_FORMAT
+
 #undef CONFIG_CRASH_LOG
 #undef CONFIG_PROP_REQUEST_CHANGE
 #undef CONFIG_AUTOBACKUP_ROM

@@ -139,6 +139,7 @@ THUMB_FN(0xe079a6c0,  SetGUIRequestMode)                  // by debug message "S
 /** Dialog API **/
 THUMB_FN(0xe078ded8,  dialog_redraw)                      // WINSYS_CreateDialogBox (0xE078DEAC)+0x2C like R5; checks pDialog signature (Dialog.c line 0x2BA). Really WINSYS_DisplayDialog: on a dialog already shown it only logs "already Display!!!"; the dirty-rect flush is 0xE078C8C4
 THUMB_FN(0xe0799b50,  dialog_set_property_str)            // call with "RF-TEST" as 3rd arg (0xE0446DC0)
+THUMB_FN(0xe078c8c4,  dialog_refresh)                     // repaints a shown dialog's dirty rect; Canon calls it after changing items, in task CtrlSrv (format dialog 0xE0BAD0DC, 0xE0BAD356). 7 = bad signature, 0 = ok
 
 /** GUI timers (2) **/
 THUMB_FN(0xe09e2e2e,  StartDateTimer)                     // by debug message "MenuMain.c StartDateTimer(%#x)"
@@ -167,7 +168,7 @@ THUMB_FN(0xe07bc630,  DeleteMemorySuite)                  // DebugMsg "DeleteMem
 //THUMB_FN(0xe080bb32,  SRM_FreeMemoryResourceFor1stJob)    // DUMMY on DIGIC X: asserts in Resource::RscMgrOldApiStub.c line 45 - keep disabled
 
 /** Uncategorized **/
-DATA_PTR(   0x1f518,  sd_device)                          // From SD_DeviceCreate: (0xE01E3072), array of 2 device ptrs indexed by StorageID
+DATA_PTR(   0x1f518,  sd_device)                          // From SD_DeviceCreate: (0xE01E3072), array of 2 device ptrs; index = StorageID == 1 ? 0 : 1 (0xE0190FC8), so A: = [1], B: = [0] (SD_DEVICE_INDEX_A/B)
 THUMB_FN(0xe0a84d60,  _LoadCalendarFromRTC)               // Used in GUI_SetStartMovieRecDate() (0xE08CD214)
 THUMB_FN(0xe0bfdda4,  ErrForCamera_handler)               // via debug msg: "DlgErrForCamera.c TERMINATE_WINSYS"
 

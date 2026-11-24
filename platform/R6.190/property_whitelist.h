@@ -41,6 +41,10 @@ const uint32_t prop_write_allow[] =
     // info menu, battery warning); the MPU answers with a new report.
     // CONFIG_PROP_REQUEST_CHANGE stays off: nothing else is written.
     PROP_BATTERY_REPORT,
+    // CONFIG_RESTORE_AFTER_FORMAT's restart only (src/property.c): value 0,
+    // len 4, as Canon's firmware update "complete" dialogs request it
+    // (0xE07AE806); handled by the CameraConductor (0xE0348A13).
+    PROP_REBOOT,
 };
 
 // anything not listed above will allow reads but not writes

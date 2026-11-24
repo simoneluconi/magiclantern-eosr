@@ -250,6 +250,31 @@ extern int lv_display_is_evf(void);     /* faceyuv.c: the EVF alone is on */
 #define PLAY_MODE (gui_state == GUISTATE_PLAYMENU && CURRENT_GUI_MODE == GUIMODE_PLAY)
 #define MENU_MODE (gui_state == GUISTATE_PLAYMENU && CURRENT_GUI_MODE == GUIMODE_MENU)
 
+/* Canon's card format dialogs, for CONFIG_RESTORE_AFTER_FORMAT (src/debug.c).
+ * Research: ML-R6\research\features\FORMAT.md. Each word is the dialog
+ * pointer, 0 while the dialog is closed:
+ * - Begin (the confirmation): set by StartMnCardFormatBeginApp 0xE0BAD43C,
+ *   cleared by StopMnCardFormatBeginApp 0xE0BAD0FC or TERMINATE_WINSYS.
+ *   The drive it formats is the u16 before it: 1 = A: (slot 1), 2 = B:
+ *   (slot 2), as FIO_GetDriveName(wDriveNo - 1) and "%c:" = 'A' + StorageID.
+ * - Execute (the progress): set by StartMnCardFormatexcuteApp 0xE0BDEBB8,
+ *   before Begin is closed; cleared by StopMnCardFormatexcuteApp 0xE0BDE51E
+ *   at progress 100, on an error or on TERMINATE_WINSYS.
+ * Begin dialog items: 3 title, 4 "Format cardN", 5 "All data will be
+ * lost!", 8 / 9 used / total size (template 0xA1). INFO reaches the dialog
+ * as PRESS_INFO and is swallowed there; the low level format is on ERASE.
+ * No FORMAT_STR_LOC: no format dialog is left while ML is restored. */
+#define DIALOG_MnCardFormatBegin   (0x354CC)
+#define DIALOG_MnCardFormatExecute (0x3ACF8)
+#define FORMATTING_CF_CARD (*(volatile uint16_t *)0x354C8 == 1) /* formatting A: */
+#define FORMAT_BTN       BGMT_INFO
+#define FORMAT_BTN_NAME  "[INFO]"
+
+/* Two SD slots, one device struct each: sd_device index of A: / B:
+ * (0xE0190FC8: index = StorageID == 1 ? 0 : 1), for src/bootflags.c. */
+#define SD_DEVICE_INDEX_A 1
+#define SD_DEVICE_INDEX_B 0
+
 /* WRONG: copied straight from 200d/50d via R5 */
 // Definitely wrong / hacks / no testing at all:
 #define IMGPLAY_ZOOM_LEVEL_ADDR (0x2CBC) //wrong

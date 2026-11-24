@@ -180,6 +180,17 @@
  * (src/property.h, src/propvalues.c). */
 #define CONFIG_PROP_MOVIE_CONTROL_PARAM
 
+/** CONFIG_RESTORE_AFTER_FORMAT (src/debug.c):
+ * - ML's files are kept in Canon's AllocateMemory pool, the only one for
+ *   this on R6 (no shoot_malloc / SRM): 3.5 to 4.9 MB free, so at most
+ *   2 MB, which leaves 1.5 MB. ML itself takes under 1 MB on the card.
+ * - dialog_redraw() is WINSYS_DisplayDialog, which doesn't repaint a shown
+ *   dialog; Canon changes and repaints the format dialog in task CtrlSrv
+ *   (dialog_refresh, stubs.S), and painting from GuiMainTask is avoided on
+ *   R6 (zebra.c). So the dialog text goes through CtrlSrv. */
+#define CONFIG_RESTORE_AFTER_FORMAT_MAX_SIZE (2 * 1024 * 1024)
+#define CONFIG_DIALOG_TEXT_IN_CTRLSRV
+
 #define CONFIG_TASK_STRUCT_V2_SMP
 #define CONFIG_TASK_ATTR_STRUCT_V5
 
