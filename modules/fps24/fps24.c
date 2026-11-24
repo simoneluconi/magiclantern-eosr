@@ -9,6 +9,10 @@
  * every other rate are built as stock. Nothing persists but Canon's own setting, which a
  * stock builder ignores: a boot without ML records 23.98p.
  *
+ * Camera: with P1-P5 24.00p goes live (fps index 9, 60.00 Hz sync) but REC stays BUSY:
+ * the GUI's record drive request still asked for 23.98p (P6 fixes it, in only while 24.00p
+ * is live), and the colour modules found no parameters for fps index 9 (P7: as 23.98p).
+ *
  * Apply (FPS24.md 7.3): check every stock word and the timing table pointer, fill the 8
  * timing cells of column 9 (RAM, only if still 0), then the 5 ROM patches in one
  * apply_patches() call (all or nothing; it checks the stock bytes again).
@@ -46,6 +50,7 @@ struct f24_group { const struct f24_word * w; int n; };
 static const struct f24_group f24_groups[] =
 {
     { f24_p5, COUNT(f24_p5) },
+    { f24_p7, COUNT(f24_p7) },
     { f24_p4n, COUNT(f24_p4n) },
     { f24_p3, COUNT(f24_p3) },
     { f24_p2, COUNT(f24_p2) },
@@ -218,6 +223,42 @@ static int f24_apply(void)
     return 1;
 }
 
+/* P6, the GUI's record drive request, follows the live state: in while Canon's movie
+ * parameters are 24.00 (REC then asks for fps index 9, as the LiveView runs), out otherwise
+ * (stock request, index 4, as the LiveView runs). So the two agree in every steady state,
+ * also while 24.00p is still live after the entry was turned off */
+static int f24_p6_in;
+static uint32_t f24_p6_buf[2][COUNT(f24_p6)];
+
+static void f24_p6_step(void)
+{
+    int want = f24_live();
+    if (want == f24_p6_in) return;
+    if (!want)
+    {
+        int e = unpatch_memory(f24_p6[0].addr);
+        if (e) printf("fps24: unpatch P6: %x\n", e);
+        f24_p6_in = 0;
+        return;
+    }
+    for (int i = 0; i < COUNT(f24_p6); i++)
+    {
+        if (f24_p6[i].addr != f24_p6[0].addr + 4 * i || RD32(f24_p6[i].addr) != f24_p6[i].stock)
+        {
+            printf("fps24: P6 %08x is %08x, not %08x\n", f24_p6[i].addr, RD32(f24_p6[i].addr), f24_p6[i].stock);
+            return;
+        }
+        f24_p6_buf[0][i] = f24_p6[i].stock;
+        f24_p6_buf[1][i] = f24_p6[i].val;
+    }
+    struct patch p = { .addr = (uint8_t *) f24_p6[0].addr, .old_values = (uint8_t *) f24_p6_buf[0],
+                       .new_values = (uint8_t *) f24_p6_buf[1], .size = 4 * COUNT(f24_p6),
+                       .is_instruction = 1, .description = f24_p6[0].what };
+    int e = apply_patches(&p, 1);
+    if (e) { printf("fps24: P6 apply %x\n", e); return; }
+    f24_p6_in = 1;
+}
+
 static void f24_remove(int from, int to)
 {
     for (int g = from; g <= to; g++)
@@ -318,6 +359,7 @@ static void f24_task(void * unused)
         if (ml_shutdown_requested) break;
         f24_dm_step();                          /* also while recording / BUSY */
         if (!f24_can_change()) continue;
+        f24_p6_step();
 
         if (f24_ui && !f24_all_in())
         {
@@ -415,7 +457,11 @@ static unsigned int f24_deinit(void)
 {
     /* at power off touch nothing: the patches and cells are in RAM, stock at the next boot */
     if (ml_shutdown_requested) return 0;
-    if (f24_can_change()) f24_remove(0, F24_NG - 1);    /* the builder first */
+    if (f24_can_change())
+    {
+        f24_remove(0, F24_NG - 1);              /* the builder first */
+        if (f24_p6_in) { unpatch_memory(f24_p6[0].addr); f24_p6_in = 0; }
+    }
     return 0;
 }
 

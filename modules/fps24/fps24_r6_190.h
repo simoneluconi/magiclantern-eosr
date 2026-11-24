@@ -133,12 +133,72 @@ static const struct f24_cell f24_cells[] =
 
 #define F24_IMGCTRL       0x17658       /* +0x10 sensor VD (read only, shown in the menu) */
 
-/* runtime MMU pages E1F10000, E0B70000, E06B0000, E03D0000 (4) in sections E1F, E0B, E06,
- * E03 on top of the port's 6 runtime pages / 6 L2 tables. The port's runtime pages are in
- * sections E07 E05 E03 E04 E0D (E03A0000 shares E03 with P5), so 3 more tables cover the
- * union in every case (platform/R6.190/internals.h: max 19 pages, 12 L2 tables) */
-#define F24_PAGES         (6 + 4)
-#define F24_L2            (6 + 3)
+/* P6 (FPS24.md 8): REC waits while GmtState E06C6A40 sees "RecDrive Mismatch FrameRate[4 9]"
+ * (camera): the GUI's record drive request (GetLvGuiContDrivingMode E08CD1AE: drive mode,
+ * size, rounded rate, 24.00 flag) is built from the GUI's copy of 0x800000C7, still
+ * 2400/2398, so it asks for fps index 4 while the LiveView runs 9. The rewrite also sets the
+ * flag when the rate is 2400, the size UHD and Canon's 24.00p setting on, P5's rule; the
+ * module keeps it in only while 24.00p is live, so request and LiveView always agree.
+ * Emulated over 144 cases (rec24.py). One Canon log line dropped. Page E08C0000 */
+static const struct f24_word f24_p6[] =
+{
+    { 0xE08CD1AC, 0xB53EBD10, 0xB53EBD10, 1, "fps24 rec drive request" },
+    { 0xE08CD1B0, 0x46042901, 0x60014604, 1, "fps24 rec drive request" },
+    { 0xE08CD1B4, 0x6516F44F, 0xD0162901, 1, "fps24 rec drive request" },
+    { 0xE08CD1B8, 0xD00B6001, 0xF9B6F1D8, 1, "fps24 rec drive request" },
+    { 0xE08CD1BC, 0xF9B4F1D8, 0xF1D860A0, 1, "fps24 rec drive request" },
+    { 0xE08CD1C0, 0xF1D860A0, 0x6060F996, 1, "fps24 rec drive request" },
+    { 0xE08CD1C4, 0x6060F994, 0xF9B6F1D8, 1, "fps24 rec drive request" },
+    { 0xE08CD1C8, 0xF9B4F1D8, 0x6F16F5B0, 1, "fps24 rec drive request" },
+    { 0xE08CD1CC, 0xD10A42A8, 0x68A0D009, 1, "fps24 rec drive request" },
+    { 0xE08CD1D0, 0xE0092001, 0x6F16F5B0, 1, "fps24 rec drive request" },
+    { 0xE08CD1D4, 0xFA51F1D8, 0x6860D112, 1, "fps24 rec drive request" },
+    { 0xE08CD1D8, 0xF1D860A0, 0xD10F2805, 1, "fps24 rec drive request" },
+    { 0xE08CD1DC, 0x6060FA47, 0xFBF5F6DC, 1, "fps24 rec drive request" },
+    { 0xE08CD1E0, 0xFA51F1D8, 0x2001B168, 1, "fps24 rec drive request" },
+    { 0xE08CD1E4, 0x2000E7F2, 0xF1D8E00B, 1, "fps24 rec drive request" },
+    { 0xE08CD1E8, 0xE9D460E0, 0x60A0FA48, 1, "fps24 rec drive request" },
+    { 0xE08CD1EC, 0x91001201, 0xFA3EF1D8, 1, "fps24 rec drive request" },
+    { 0xE08CD1F0, 0xE9CD2103, 0xF1D86060, 1, "fps24 rec drive request" },
+    { 0xE08CD1F4, 0x20822001, 0xF5B0FA48, 1, "fps24 rec drive request" },
+    { 0xE08CD1F8, 0xA2EC6823, 0xD0F26F16, 1, "fps24 rec drive request" },
+    { 0xE08CD1FC, 0xF8A8F70D, 0x60E02000, 1, "fps24 rec drive request" },
+    { 0xE08CD200, 0xB500BD3E, 0xB500BD3E, 1, "fps24 rec drive request" },
+};
+
+/* P7 (FPS24.md 8): every colour module (lens correction, NR, AWB, histogram, resize) finds
+ * its parameters through E0810A70, which searches table E1C84420 by (1, sensor row, fps
+ * index); no row has fps index 9, so 24.00p fell back to entry 0 (camera: "L-1 1 15 9" each
+ * frame, AWB "CountOfWhiteSearch = 0"). The rewrite looks fps 9 up as 4 (23.98p: same sensor
+ * row and readout). No table row has fps 9, so nothing else changes (emulated: 36 keys x 2
+ * kinds). Page E0810000 */
+static const struct f24_word f24_p7[] =
+{
+    { 0xE0810A70, 0x2200B570, 0x2200B570, 1, "fps24 colour mode lookup" },
+    { 0xE0810A74, 0xEB024DF6, 0x68854BF6, 1, "fps24 colour mode lookup" },
+    { 0xE0810A78, 0xEB050342, 0xBF082D09, 1, "fps24 colour mode lookup" },
+    { 0xE0810A7C, 0x68DC1303, 0x68DC2504, 1, "fps24 colour mode lookup" },
+    { 0xE0810A80, 0xD001428C, 0xD001428C, 1, "fps24 colour mode lookup" },
+    { 0xE0810A84, 0xD10D2C02, 0xD10C2C02, 1, "fps24 colour mode lookup" },
+    { 0xE0810A88, 0x685E6844, 0x685E6844, 1, "fps24 colour mode lookup" },
+    { 0xE0810A8C, 0xD10942B4, 0xD10842B4, 1, "fps24 colour mode lookup" },
+    { 0xE0810A90, 0x689E6884, 0x42B5689E, 1, "fps24 colour mode lookup" },
+    { 0xE0810A94, 0xD10542B4, 0x6804D105, 1, "fps24 colour mode lookup" },
+    { 0xE0810A98, 0x681B6804, 0x42B4681E, 1, "fps24 colour mode lookup" },
+    { 0xE0810A9C, 0xD101429C, 0xB210D101, 1, "fps24 colour mode lookup" },
+    { 0xE0810AA0, 0xBD70B210, 0x3330BD70, 1, "fps24 colour mode lookup" },
+    { 0xE0810AA4, 0x2A251C52, 0x2A253201, 1, "fps24 colour mode lookup" },
+    { 0xE0810AA8, 0xF04FD9E5, 0xF04FD9E9, 1, "fps24 colour mode lookup" },
+    { 0xE0810AAC, 0xBD7030FF, 0xBD7030FF, 1, "fps24 colour mode lookup" },
+};
+
+/* runtime MMU pages E1F10000, E0B70000, E06B0000, E03D0000, E08C0000, E0810000 (6) in sections
+ * E1F, E0B, E06, E03, E08 on top of the port's 6 runtime pages / 6 L2 tables. The port's
+ * runtime pages are in sections E07 E05 E03 E04 E0D (E03A0000 shares E03 with P5), so 4
+ * more tables cover the union in every case (platform/R6.190/internals.h: max 19 pages,
+ * 12 L2 tables) */
+#define F24_PAGES         (6 + 6)
+#define F24_L2            (6 + 4)
 
 /* the opengate module is in when its first HEVC level word (30p ALL-I, stock 52) is patched */
 #define F24_OPENGATE_WORD 0xE1F1E7CC
