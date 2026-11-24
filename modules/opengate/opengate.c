@@ -639,11 +639,13 @@ static int og_player_can_change(void)
     return lv && !is_play_or_qr_mode() && !RECORDING;
 }
 
-/* the words of a player mode: 1 = P1-P3, 2 = P1-P3 + D1 (test) */
+/* the words of a player mode: 1 = P1-P3; tests: 2 = + D1 (8K resize path), 3 = + X1 (no
+ * ORCA convert), 4 = + X2 (no ORCA resize) */
 static const struct og_word * og_player_word(int mode, int i)
 {
     if (i < COUNT(og_player_words)) return &og_player_words[i];
-    return mode == 2 && i == COUNT(og_player_words) ? &og_player_d1 : 0;
+    if (i > COUNT(og_player_words)) return 0;
+    return mode == 2 ? &og_player_d1 : mode == 3 ? &og_player_x1 : mode == 4 ? &og_player_x2 : 0;
 }
 
 static int og_player_apply(int mode)
@@ -731,8 +733,29 @@ static void og_dm_arm(void)
     if ((p = og_rd(0x3755C)) && og_ram_ok(p & ~3, 4)) og_dm_class(s, RD8(p));
 }
 
+/* every class at store level 1 for the first seconds of playback (the ORCA engine and
+ * wrapper classes are not known in advance); saved and restored as a whole */
+#define OG_DM_ALL_MS   10000
+static uint8_t og_dm_all_saved[256];
+static int og_dm_all_on;
+
+static void og_dm_all(int on)
+{
+    uint32_t s = og_dm_s();
+    if (!s || on == og_dm_all_on) return;
+    if (on)
+        for (int c = 0; c < 256; c++) { og_dm_all_saved[c] = RD8(s + 3 * c + 0x38); RD8(s + 3 * c + 0x38) = 1; }
+    else
+    {
+        og_log("dm: all classes restored (class 1f store level was %d)", RD8(s + 3 * 0x1F + 0x38));
+        for (int c = 0; c < 256; c++) RD8(s + 3 * c + 0x38) = og_dm_all_saved[c];
+    }
+    og_dm_all_on = on;
+}
+
 static void og_dm_restore(void)
 {
+    og_dm_all(0);
     uint32_t s = og_dm_s();
     for (int i = 0; s && i < og_dm_ncls; i++) RD8(s + 3 * og_dm_cls[i] + 0x38) = og_dm_saved[i];
     og_dm_ncls = 0;
@@ -811,6 +834,7 @@ static void og_dm_step(void)
         if (og_dm_play_since)
         {
             og_dm_play_since = 0;
+            og_dm_all(0);
             FIO_RemoveFile(OG_DM_ARM_FILE);         /* left playback normally */
         }
         return;
@@ -822,7 +846,9 @@ static void og_dm_step(void)
         og_dm_last = now - OG_DM_PERIOD;
         FILE * f = FIO_CreateFile(OG_DM_ARM_FILE);
         if (f) FIO_CloseFile(f);
+        og_dm_all(1);
     }
+    if (now - og_dm_play_since > OG_DM_ALL_MS) og_dm_all(0);
     int period = now - og_dm_play_since < OG_DM_FAST_MS ? OG_DM_FAST : OG_DM_PERIOD;
     if (now - og_dm_play_since > OG_DM_TIME || now - og_dm_last < period) return;
     og_dm_last = now;
@@ -1422,8 +1448,8 @@ static struct menu_entry og_menu[] =
             {
                 .name   = "Play open gate clips",
                 .priv   = &og_player,
-                .max    = 2,
-                .choices = CHOICES("OFF", "ON", "ON, 8K resize (test)"),
+                .max    = 4,
+                .choices = CHOICES("OFF", "ON", "ON, 8K resize (test)", "ON, no convert (test)", "ON, no resize (test)"),
                 .update = og_player_update,
                 .help   = "Experimental: Canon's player opens 4096x2736 clips. OFF at every boot.",
                 .help2  = "Set in LiveView. Test: the 8K resize path for the preview (diagnostic).",

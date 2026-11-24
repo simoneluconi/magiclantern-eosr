@@ -289,6 +289,14 @@ static const struct og_word og_player_words[] =
 static const struct og_word og_player_d1 =
     { 0xE04EFB90, 0x2402FDC1, 0x2401FDC1, 1, "OG player test: 8K resize path" };  /* movs r4,#2 -> #1 */
 
+/* bisection (PLAYER-2736.md 10): camera, D1 decodes 3 frames of 2736 rows in ~77 ms, then
+ * waits 500 ms and fails (80000011): the decoder is fine, the ORCA convert/resize is not.
+ * X1: the convert (mvpCnvMp4) returns an error at once; X2: the resize (mvpRszMp4) does */
+static const struct og_word og_player_x1 =
+    { 0xE04052D4, 0x460DB570, 0x47702001, 1, "OG player test: no ORCA convert" };  /* movs r0,#1; bx lr */
+static const struct og_word og_player_x2 =
+    { 0xE0405204, 0x47F0E92D, 0x47702001, 1, "OG player test: no ORCA resize" };   /* movs r0,#1; bx lr */
+
 #define OG_PLAYER_PAGES   2
 #define OG_PLAYER_L2      1
 #define OG_ALL_PAGES      19
