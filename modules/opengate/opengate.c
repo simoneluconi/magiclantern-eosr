@@ -705,6 +705,7 @@ static int og_removal_needed(void)
  * removes the patches. So a change that arrives while the worker is applying is never
  * missed: the worker finishes the apply, gives the lock, and the removal follows. */
 static volatile int og_lost_pending;
+static volatile int og_lost_keep;       /* the setting is still known (only the patches go) */
 static const char * volatile og_lost_why = "";
 static volatile int og_removed_notice;  /* removal to show to the user (worker) */
 
@@ -713,7 +714,8 @@ static void og_handle_lost_locked(void)
 {
     if (!og_lost_pending || RECORDING) return;
     og_lost_pending = 0;
-    og_setting_col = 0;
+    if (!og_lost_keep) og_setting_col = 0;
+    og_lost_keep = 0;
     if (!og_removal_needed()) return;
     og_remove();
     og_reason = og_lost_why;
@@ -721,16 +723,23 @@ static void og_handle_lost_locked(void)
     og_removed_notice = 1;
 }
 
-/* from a property handler (task context): remove at once if possible */
-static void og_setting_lost(const char * why)
+/* from a property handler (task context): remove at once if possible. keep: the open-gate
+ * setting stays known (another movie setting changed), the next safe point re-applies */
+static void og_lost(const char * why, int keep)
 {
-    og_setting_col = 0;
+    if (!keep) og_setting_col = 0;
+    og_lost_keep = keep && !og_lost_pending;
     og_lost_why = why;
     og_lost_pending = 1;
     if (RECORDING) return;                          /* the worker removes after the stop */
     if (take_semaphore(og_lock, 1000) != 0) return; /* the worker removes on its next step */
     og_handle_lost_locked();
     give_semaphore(og_lock);
+}
+
+static void og_setting_lost(const char * why)
+{
+    og_lost(why, 0);
 }
 
 /* Canon's movie setting: PROP_MOVIE_CONTROL_PARAM and PROP_MOVIE_CROP_MODE (src/property.h;
@@ -774,18 +783,27 @@ static int og_mcp_col(const struct og_mcp * m, const char ** why)
 
 /* debug: when each posting comes, relative to Canon's LiveView state (is the setting
  * posted before the movie LV restarts?). Written by the handlers, logged by the worker */
-struct og_ev { int ms; uint32_t prop, a, b, c, d; int cap, slot, path, state; };
+struct og_ev { int ms; uint32_t prop, a, b, c, d, dlo, dhi; int cap, slot, path, state; };
 #define OG_EV_N 16
 static struct og_ev og_ev[OG_EV_N];
 static volatile int og_ev_w, og_ev_r;
 
-static void og_event(uint32_t prop, uint32_t a, uint32_t b, uint32_t c, uint32_t d)
+static void og_event(uint32_t prop, uint32_t a, uint32_t b, uint32_t c, uint32_t d, uint32_t dlo, uint32_t dhi)
 {
     if (!og_debug || og_ev_w - og_ev_r >= OG_EV_N) return;
-    og_ev[og_ev_w % OG_EV_N] = (struct og_ev) { get_ms_clock(), prop, a, b, c, d,
+    og_ev[og_ev_w % OG_EV_N] = (struct og_ev) { get_ms_clock(), prop, a, b, c, d, dlo, dhi,
                                                 og_capmode(), og_slot(), og_path(), og_state };
     og_ev_w++;
 }
+
+/* the whole last posting: any change other than the frame rate (words 0 and 1, byte 0x30
+ * PAL / NTSC) is a new recording setup for Canon (codec, bit depth, GOP, quality...).
+ * Switching Canon Log on (H.264 8-bit -> HEVC 10-bit) with the patches ACTIVE gave Err 70
+ * (camera log): such a change removes the patches, and the next safe point re-applies */
+static uint8_t og_mcp_raw[PROP_MOVIE_CONTROL_PARAM_LEN];
+static int og_mcp_raw_ok;
+#define OG_MCP_FPS_LO  0x000000FFu      /* bytes 0-7: w0, w1 */
+#define OG_MCP_FPS_HI  (1u << (0x30 - 32))
 
 PROP_HANDLER(PROP_MOVIE_CONTROL_PARAM)
 {
@@ -794,18 +812,27 @@ PROP_HANDLER(PROP_MOVIE_CONTROL_PARAM)
     {
         const uint8_t * b = (const uint8_t *) buf;
         struct og_mcp m = { buf[1], b[8], b[0x2C] };
-        og_event(PROP_MOVIE_CONTROL_PARAM, m.fps100, m.size, m.readout, b[0x30]);
+        uint32_t dlo = 0, dhi = 0;              /* bytes that differ from the last posting */
+        if (og_mcp_raw_ok)
+            for (int i = 0; i < PROP_MOVIE_CONTROL_PARAM_LEN; i++)
+                if (b[i] != og_mcp_raw[i]) { if (i < 32) dlo |= 1u << i; else dhi |= 1u << (i - 32); }
+        memcpy(og_mcp_raw, b, PROP_MOVIE_CONTROL_PARAM_LEN);
+        og_mcp_raw_ok = 1;
+        og_event(PROP_MOVIE_CONTROL_PARAM, m.fps100, m.size, m.readout, b[0x30], dlo, dhi);
         int changed = !og_mcp_calls || memcmp(&m, &og_mcp, sizeof(m)) != 0;
+        int other = (dlo & ~OG_MCP_FPS_LO) || (dhi & ~OG_MCP_FPS_HI);
         og_mcp = m;
         og_mcp_calls++;
+        const char * why = 0;
         if (changed)
         {
             og_setting_changes++;
-            /* a supported rate stays applied: all three columns are patched, and the
-             * live check follows the live one */
-            const char * why;
+            /* a supported rate alone stays applied: all three columns are patched, and
+             * the live check follows the live one */
             if (!og_mcp_col(&m, &why)) og_setting_lost(why);
         }
+        if (other && !why && og_removal_needed())
+            og_lost("Movie recording settings changed", 1);
     }
     og_in_handler = 0;
 }
@@ -813,7 +840,7 @@ PROP_HANDLER(PROP_MOVIE_CONTROL_PARAM)
 PROP_HANDLER(PROP_MOVIE_CROP_MODE)
 {
     og_in_handler = 1;
-    og_event(PROP_MOVIE_CROP_MODE, buf[0], 0, 0, 0);
+    og_event(PROP_MOVIE_CROP_MODE, buf[0], 0, 0, 0, 0, 0);
     int c = buf[0] != 0;
     if (c != og_crop) og_setting_changes++;
     og_crop = c;
@@ -824,7 +851,7 @@ PROP_HANDLER(PROP_MOVIE_CROP_MODE)
 PROP_HANDLER(PROP_HDMI_CHANGE)
 {
     og_in_handler = 1;
-    og_event(PROP_HDMI_CHANGE, buf[0], 0, 0, 0);
+    og_event(PROP_HDMI_CHANGE, buf[0], 0, 0, 0, 0, 0);
     og_hdmi = buf[0];
     if (og_hdmi) og_setting_lost("HDMI connected");
     og_in_handler = 0;
@@ -1015,8 +1042,8 @@ static void og_debug_step(void)
     {
         struct og_ev e = og_ev[og_ev_r % OG_EV_N];
         og_ev_r++;
-        og_log("prop %x at %d: %d %d %d %d; then capmode %x slot %d path %x state %d; now capmode %x slot %d path %x",
-               e.prop, e.ms, e.a, e.b, e.c, e.d, e.cap, e.slot, e.path, e.state, og_capmode(), og_slot(), og_path());
+        og_log("prop %x at %d: %d %d %d %d (changed bytes mask %05x%08x); then capmode %x slot %d path %x state %d; now capmode %x slot %d path %x",
+               e.prop, e.ms, e.a, e.b, e.c, e.d, e.dhi, e.dlo, e.cap, e.slot, e.path, e.state, og_capmode(), og_slot(), og_path());
     }
     /* does the core get the setting at boot, before the module is loaded? */
     static int logged_core;
