@@ -736,7 +736,10 @@ static void og_setting_lost(const char * why)
 /* Canon's movie setting: PROP_MOVIE_CONTROL_PARAM and PROP_MOVIE_CROP_MODE (src/property.h;
  * delivered by an ML core with CONFIG_PROP_MOVIE_CONTROL_PARAM, R6 has no PROP_VIDEO_MODE).
  * With an older core neither arrives and only the live checks remain. */
-struct og_mcp { uint32_t fps100, size, readout, f24; };
+/* only what decides: byte 0x30 (0 NTSC / 1 PAL rates, 2 = 24.00p) is not kept, 24.00p has
+ * its own exact rate (2400, not supported); Canon re-posts the same values at every
+ * photo / movie switch, which must not count as a change */
+struct og_mcp { uint32_t fps100, size, readout; };
 static struct og_mcp og_mcp;            /* last posted */
 static volatile int og_mcp_calls;
 static volatile int og_crop;            /* movie crop on */
@@ -744,7 +747,6 @@ static volatile int og_setting_changes; /* counts posted changes of the setting 
 
 #define OG_MCP_SIZE_UHD     5
 #define OG_MCP_READOUT_FULL 5
-#define OG_MCP_F24          2           /* byte 0x30 for 24.00p (same fps100 rounding as 23.98p) */
 
 static const struct og_rate * og_rate_of_col(int col)
 {
@@ -760,7 +762,6 @@ static int og_mcp_col(const struct og_mcp * m, const char ** why)
     int col = 0;
     if (m->size != OG_MCP_SIZE_UHD) w = "Movie size is not 4K";
     else if (m->readout != OG_MCP_READOUT_FULL) w = "Movie crop on";
-    else if (m->f24 == OG_MCP_F24) w = "24.00p not supported";
     else
     {
         for (int i = 0; i < COUNT(og_rates); i++)
@@ -792,8 +793,8 @@ PROP_HANDLER(PROP_MOVIE_CONTROL_PARAM)
     if (len >= PROP_MOVIE_CONTROL_PARAM_LEN)
     {
         const uint8_t * b = (const uint8_t *) buf;
-        struct og_mcp m = { buf[1], b[8], b[0x2C], b[0x30] };
-        og_event(PROP_MOVIE_CONTROL_PARAM, m.fps100, m.size, m.readout, m.f24);
+        struct og_mcp m = { buf[1], b[8], b[0x2C] };
+        og_event(PROP_MOVIE_CONTROL_PARAM, m.fps100, m.size, m.readout, b[0x30]);
         int changed = !og_mcp_calls || memcmp(&m, &og_mcp, sizeof(m)) != 0;
         og_mcp = m;
         og_mcp_calls++;
@@ -914,10 +915,9 @@ static void og_seed_from_core(void)
     if (video_mode_fps_x100 <= 0 || video_mode_size_code < 0) return;
     done = 1;
     og_crop = video_mode_movie_crop;
-    /* the readout and the 24.00p flag are not kept by the core: crop gives the readout,
-     * and 24.00p is told apart by its exact rate (2400, no supported rate) */
+    /* the core does not keep the readout: movie crop gives it (camera log: 4 with crop) */
     og_mcp = (struct og_mcp) { video_mode_fps_x100, video_mode_size_code,
-                               og_crop ? 4 : OG_MCP_READOUT_FULL, 0 };
+                               og_crop ? 4 : OG_MCP_READOUT_FULL };
     og_mcp_calls = 1;
     og_log("setting from the core at boot: fps %d size %d crop %d", og_mcp.fps100, og_mcp.size, og_crop);
 }
