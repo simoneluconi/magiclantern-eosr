@@ -49,6 +49,13 @@ int apply_normal_patches(void);
 // task context only; allocates in small blocks; never freed.
 int mmu_reserve_pages_for_patches(const struct patch *patches, uint32_t count);
 
+// Remaps the ROM page of addr to RAM with its content unchanged, if not yet
+// done (apply_patches calls it for each patch before the batch).
+int mmu_remap_rom_page(uint32_t addr);
+
+// Longest interrupts-off section of a ROM patch since boot, in us.
+extern uint32_t mmu_patch_max_irqoff_us;
+
 // Sets up structures required for remapping via MMU,
 // and applies compile-time specified patches from platform/XXD/include/platform/mmu_patches.h
 int mmu_init(void);

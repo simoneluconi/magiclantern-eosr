@@ -74,12 +74,26 @@ int is_patch_still_applied(struct patch *p)
 // said array, either apply all patches or none.
 // If any error is returned, no patches have been applied.
 // If E_PATCH_OK is returned, all applied successfully.
+/* longest interrupts-off section of apply_patches() since boot, in us */
+uint32_t patch_max_irqoff_us = 0;
+
 int apply_patches(struct patch *patches, uint32_t count)
 {
     int err = E_PATCH_OK;
 
+#if defined(CONFIG_MMU_REMAP)
+    /* Remap the ROM pages first, one page per interrupts-off section: the
+     * first remap of a page copies 64 kB of ROM, and inside the batch below
+     * these copies would add up to one long section (19 pages on R6 lost a
+     * hardware timer tick of the LiveView). Remapping alone changes nothing
+     * the camera sees. Failures show up again below, with the error. */
+    for (uint32_t c = 0; c < count; c++)
+        mmu_remap_rom_page((uint32_t) patches[c].addr);
+#endif
+
     /* ensure thread safety */
     uint32_t old_int = cli();
+    uint64_t t_cli = get_us_clock();
     uint32_t c = 0;
     for (; c < count; c++)
     {
@@ -223,6 +237,9 @@ end:
             unpatch_memory((uint32_t)(patches[c].addr));
         }
     }
+    uint32_t irqoff_us = (uint32_t)(get_us_clock() - t_cli);
+    if (irqoff_us > patch_max_irqoff_us)
+        patch_max_irqoff_us = irqoff_us;
     sei(old_int);
 
     return err;

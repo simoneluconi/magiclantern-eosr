@@ -145,6 +145,10 @@ int is_patch_still_applied(struct patch *patch);
 // If E_PATCH_OK is returned, all applied successfully.
 int apply_patches(struct patch *patches, uint32_t count);
 
+// Longest interrupts-off section of apply_patches() since boot, in us
+// (diagnostics, e.g. for a module's debug log).
+extern uint32_t patch_max_irqoff_us;
+
 /* undo the patching done by apply_patches or patch_hook_function */
 int unpatch_memory(uintptr_t addr);
 

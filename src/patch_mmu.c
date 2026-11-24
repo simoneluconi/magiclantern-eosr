@@ -1057,6 +1057,10 @@ uint32_t read_value(uint8_t *addr, int is_instruction)
     return *(uint32_t *)addr;
 }
 
+// Longest time patch_memory_rom() kept interrupts off, in microseconds,
+// since boot: a diagnostic for code that must not lose interrupts.
+uint32_t mmu_patch_max_irqoff_us = 0;
+
 // You probably don't want to call this directly.
 // This is used by apply_patch() after it decides what kind
 // of memory is at the address, since on D78X we want to use
@@ -1074,6 +1078,7 @@ static int patch_memory_rom(struct patch *patch)
         return E_PATCH_TOO_SMALL;
 
     uint32_t old_int = cli();
+    uint64_t t_cli = get_us_clock();
 
     // cpu0 waits for cpu1 to be in the wait loop
     struct busy_wait wait =
@@ -1109,6 +1114,9 @@ static int patch_memory_rom(struct patch *patch)
     // cpu0 wakes cpu1, which updates ttbrs, sei
     if (local_is_cpu1_ready)
         wake_cpu1_busy_wait(&wait);
+    uint32_t irqoff_us = (uint32_t)(get_us_clock() - t_cli);
+    if (irqoff_us > mmu_patch_max_irqoff_us)
+        mmu_patch_max_irqoff_us = irqoff_us;
     sei(old_int);
 
     // SJE TODO we could be more selective about the cache flush,
@@ -1233,6 +1241,34 @@ static uint8_t *find_phys_mem(uint32_t virtual_addr)
         return NULL;
 
     return L2_table->phys_mem[page_index] + low_half_virt_addr;
+}
+
+// Remaps the 64kB ROM page holding addr to its RAM copy, content unchanged,
+// if it isn't remapped yet: the first remap of a page copies 64kB of ROM
+// and cleans the caches with interrupts off (patch_memory_rom). Called for
+// each page before a batch of patches goes in with interrupts off for the
+// whole batch (apply_patches), so that each page costs one short section
+// of its own instead of adding up in one long one. Returns 0 if the page
+// is (now) remapped, or the patch error.
+int mmu_remap_rom_page(uint32_t addr)
+{
+    if (!IS_ROM_PTR(addr))
+        return 0;
+    if (!mmu_globals_initialised)
+        return E_PATCH_MMU_NOT_INIT;
+    if (find_phys_mem(addr) != NULL)
+        return 0;
+
+    uint32_t word = addr & ~3;
+    struct patch p =
+    {
+        .addr = (uint8_t *)word,
+        .old_value = *(uint32_t *)word,
+        .new_value = *(uint32_t *)word,
+        .size = 4,
+        .description = "remap",
+    };
+    return patch_memory_rom(&p);
 }
 
 // Undo the patching done by one of the above calls.
