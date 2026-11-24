@@ -511,7 +511,8 @@
 // buf[1]: fps x 100, exact (2398, 2400, 2500, 2997, 5000, 5994, 10000, 11988)
 // byte 8: movie size (0 FHD, 5 UHD / 4K, as the encoder's MovieSize)
 // byte 0x2C: sensor readout (4 with movie crop, else 5)
-// byte 0x30: 2 for 24.00p
+// byte 0x30: 0 for NTSC rates, 1 for PAL rates (seen on R6); 2 for 24.00p
+//            (firmware, not offered by the R6 menu)
 #define PROP_MOVIE_CONTROL_PARAM 0x800000CC
 #define PROP_MOVIE_CONTROL_PARAM_LEN 0x34
 #define PROP_MOVIE_CROP_MODE     0x80020054 // buf[0]: movie crop (non-zero = on)

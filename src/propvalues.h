@@ -103,6 +103,7 @@ extern int video_mode_resolution; // 0 if full hd, 1 if 720p, 2 if 480p
 /* CONFIG_PROP_MOVIE_CONTROL_PARAM (R6) only: Canon's own codes (propvalues.c) */
 extern int video_mode_size_code;  // Canon's movie size: 0 FHD, 5 UHD / 4K; -1 not posted yet
 extern int video_mode_movie_crop; // Canon's movie crop on (not ML's video_mode_crop)
+extern int video_mode_fps_x100;   // exact frame rate x 100 (2398 = 23.976p, 2997 = 29.97p); 0 not posted yet
 extern int lv_movie_select;
 extern int sensor_cleaning;
 extern int burst_count;

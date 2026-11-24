@@ -243,12 +243,14 @@ PROP_HANDLER(PROP_VIDEO_MODE)
  * FPS timer tables, raw and digital zoom paths of older cams). */
 volatile int video_mode_size_code = -1;     /* Canon's movie size: 0 FHD, 5 UHD / 4K */
 volatile int video_mode_movie_crop = 0;     /* Canon's movie crop on */
+volatile int video_mode_fps_x100 = 0;       /* exact frame rate x 100 (2398, 2500, 2997...) */
 
 PROP_HANDLER(PROP_MOVIE_CONTROL_PARAM)
 {
     if (len < PROP_MOVIE_CONTROL_PARAM_LEN) return;
     video_mode_size_code = ((const uint8_t *) buf)[8];
     video_mode_resolution = 0;
+    video_mode_fps_x100 = buf[1];
     video_mode_fps = (buf[1] + 50) / 100;   /* as for PROP_VIDEO_MODE: 29.97 -> 30 */
 }
 
