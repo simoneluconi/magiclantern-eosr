@@ -85,6 +85,54 @@ static void og_log(const char * fmt, ...)
 }
 
 /* ------------------------------------------------------------------------
+ * DryOS assert hook (with the debug log only): file, line and caller of an assert
+ * (Err 70) go to the log. The port has no ML assert logger (CONFIG_CRASH_LOG is off
+ * on R6). The handler may run in any context: it only copies into a static buffer,
+ * and the worker writes it. Same hook as the ogprobe module of the encoder tests.
+ * ------------------------------------------------------------------------ */
+
+#define OG_ASSERT_HANDLER_PTR 0x4000    /* DRYOS_ASSERT_HANDLER, platform/R6.190/consts.h */
+static int (*og_old_assert)(char *, char *, int, int);
+static volatile int og_assert_hit;      /* 1 = to write, 2 = written */
+static char og_assert_buf[240];
+static uint32_t og_assert_ctx[6];       /* filled by the worker: state at the last step */
+
+static void og_copy_str(char * dst, int n, const char * src)
+{
+    /* Canon's assert strings are in ROM; ours in RAM */
+    uint32_t a = (uint32_t) src;
+    int i = 0;
+    if ((a >= 0x1000 && a < 0x40000000) || (a >= 0x40001000 && a < 0x80000000) || a >= 0xE0000000)
+        for (; i < n - 1 && src[i]; i++) dst[i] = src[i];
+    dst[i] = 0;
+}
+
+static int og_assert_handler(char * msg, char * file, int line, int arg4)
+{
+    if (!og_assert_hit)
+    {
+        char m[80], f[80];
+        og_copy_str(m, sizeof(m), msg);
+        og_copy_str(f, sizeof(f), file);
+        snprintf(og_assert_buf, sizeof(og_assert_buf),
+                 "ASSERT %s at %s:%d (arg4 %x) lr %x; last step: state %d player %d lv %d play %d path %x capmode %x",
+                 m, f, line, arg4, __builtin_return_address(0), og_assert_ctx[0], og_assert_ctx[1],
+                 og_assert_ctx[2], og_assert_ctx[3], og_assert_ctx[4], og_assert_ctx[5]);
+        og_assert_hit = 1;
+    }
+    return og_old_assert(msg, file, line, arg4);
+}
+
+static void og_assert_hook_install(void)
+{
+    if (og_old_assert) return;
+    uint32_t old = RD32(OG_ASSERT_HANDLER_PTR);
+    if (old < 0xE0000000) return;       /* not Canon's handler: leave it alone */
+    og_old_assert = (void *) old;
+    RD32(OG_ASSERT_HANDLER_PTR) = (uint32_t) og_assert_handler;
+}
+
+/* ------------------------------------------------------------------------
  * Canon reads (range-checked)
  * ------------------------------------------------------------------------ */
 
@@ -874,8 +922,30 @@ static void og_check_live(void)
 #define OG_READY_MS 2500
 static int og_ready_shown;     /* time the "ready" box was shown: hidden on leaving photo mode */
 
+static void og_debug_step(void)
+{
+    if (!og_debug) return;
+    og_assert_hook_install();
+    if (og_assert_hit == 1)
+    {
+        og_assert_hit = 2;
+        og_log("%s", og_assert_buf);
+    }
+    int play = is_play_or_qr_mode();
+    og_assert_ctx[0] = og_state;
+    og_assert_ctx[1] = og_player_in;
+    og_assert_ctx[2] = lv;
+    og_assert_ctx[3] = play;
+    og_assert_ctx[4] = og_path();
+    og_assert_ctx[5] = og_capmode();
+    static int logged_play = -1;
+    if (og_player_in && play != logged_play) og_log("playback %s", play ? "entered" : "left");
+    logged_play = og_player_in ? play : -1;
+}
+
 static void og_step(void)
 {
+    og_debug_step();
     if (og_ready_shown)
     {
         if (get_ms_clock() - og_ready_shown >= OG_READY_MS) og_ready_shown = 0;
