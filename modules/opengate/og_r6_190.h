@@ -248,4 +248,28 @@ static const struct og_word og_enc_words[] =
 #define OG_BOOT_L2      6
 static const uint8_t og_reserve_steps[][2] = { { 10, 8 }, { 14, 10 }, { 17, 12 } };
 
+/* Canon's player and 4096x2736 clips (research/opengate/player/PLAYER-2736.md, stage 1).
+ * Without P1 the player refuses the clip ("Cannot play back movie"); P1 alone would let
+ * it reach the size index, which asserts for 4096 x any height but 2160 (crash), so P1
+ * never goes without P2; P2 alone or P1+P2 without P3 overruns the 6 decoded-frame
+ * buffers sized for 4096x2160 by 15.9 MiB, so the three are one all-or-nothing set.
+ * P3 applies to every clip played while it is in. */
+static const struct og_word og_player_words[] =
+{
+    { 0xE04EB9F8, 0xD11542A1, 0xBF0042A1, 1, "OG player ChkFrameRate any height" },   /* bne -> nop */
+    { 0xE04EFB84, 0x2000D005, 0x2000E005, 1, "OG player 4096 x any -> size index 2" }, /* beq -> b */
+    { 0xE0401B84, 0x61A82006, 0x61A82004, 1, "OG player 4 decoded frames, not 6" },   /* movs r0,#6 -> #4 */
+};
+
+/* pages E04E0000 and E0400000, section E04. The port's 6 boot pages (consts.h: writer
+ * E03A E05E E05F and player E04E, all with the 60-min option; time limit E074; heat
+ * timer E0D9) are in 5 sections, E03 E04 E05 E07 E0D; the open gate shares E03 and E07
+ * and adds E01 E0C E0F E1F. With the 60-min option on, E04 and page E04E0000 are already
+ * mapped: 6 + 11 + 1 = 18 pages, 5 + 4 = 9 L2 tables; with it off, at most
+ * 2 + 11 + 2 = 15 pages and 2 + 6 + 1 = 9 L2 tables. Both inside 19 / 12 */
+#define OG_PLAYER_PAGES   2
+#define OG_PLAYER_L2      1
+#define OG_ALL_PAGES      19
+#define OG_ALL_L2         12
+
 #endif

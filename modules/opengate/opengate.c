@@ -16,6 +16,8 @@
  * learnt from Canon's own 4K <= 30p LiveView (capture mode 0x1B, sensor slot 10), so
  * the user enters movie mode once before the first apply.
  *
+ * A separate option (og_player_words) lets Canon's player open the 4096x2736 clips.
+ *
  * Values and their sources: og_r6_190.h.
  */
 
@@ -513,18 +515,25 @@ static int og_prepare(const struct og_rate * r)
  * ------------------------------------------------------------------------ */
 
 static int og_pages_ok;
+static int og_player_in;        /* the player words are patched (below) */
+
+static int og_reserve(uint32_t pages, uint32_t l2)
+{
+    int e = mmu_reserve_runtime_pages(pages, l2);
+    og_log("mmu_reserve_runtime_pages(%d, %d) = %d", pages, l2, e);
+    return e == 0;
+}
 
 static int og_reserve_pages(void)
 {
-    if (og_pages_ok) return 1;
-    for (int i = 0; i < COUNT(og_reserve_steps); i++)
+    if (!og_pages_ok)
     {
-        int e = mmu_reserve_runtime_pages(og_reserve_steps[i][0], og_reserve_steps[i][1]);
-        og_log("mmu_reserve_runtime_pages(%d, %d) = %d", og_reserve_steps[i][0], og_reserve_steps[i][1], e);
-        if (e) return 0;
+        for (int i = 0; i < COUNT(og_reserve_steps); i++)
+            if (!og_reserve(og_reserve_steps[i][0], og_reserve_steps[i][1])) return 0;
+        og_pages_ok = 1;
     }
-    og_pages_ok = 1;
-    return 1;
+    /* the player words hold pages of their own: room for both (adds nothing if done) */
+    return !og_player_in || og_reserve(OG_ALL_PAGES, OG_ALL_L2);
 }
 
 static int og_commit(void)
@@ -563,6 +572,74 @@ static void og_finish_deferred(void)
     int left = og_restore_ram(1);
     og_pending_deferred = left > 0;
     og_log("deferred restore: %d words left", left);
+}
+
+/* ------------------------------------------------------------------------
+ * Canon's player for 4096x2736 clips (og_player_words): its own all-or-nothing patch
+ * set, independent of the open gate. The menu choice is not saved, so after a crash in
+ * the player the next boot plays stock and refuses the clip instead of crashing again.
+ * Applied and removed only in LiveView: Canon's player is not set up there, and its
+ * decoded-frame count (P3) is read when playback is set up, so a change while it is
+ * open could pair a 2736-row clip with buffers for 6 frames of 2160 rows.
+ * ------------------------------------------------------------------------ */
+
+static int og_player;           /* menu (not saved: OFF at boot) */
+static const char * og_player_why = "";
+
+static int og_player_can_change(void)
+{
+    return lv && !is_play_or_qr_mode() && !RECORDING;
+}
+
+static int og_player_apply(void)
+{
+    struct patch p[COUNT(og_player_words)];
+    for (int i = 0; i < COUNT(og_player_words); i++)
+    {
+        const struct og_word * w = &og_player_words[i];
+        if (RD32(w->addr) != w->stock)
+        {
+            og_log("player: rom %08x (%s) is %08x, not %08x", w->addr, w->what, RD32(w->addr), w->stock);
+            og_player_why = "ROM not stock";
+            return 0;
+        }
+        p[i] = (struct patch) { .addr = (uint8_t *) w->addr, .old_value = w->stock, .new_value = w->val,
+                                .size = 4, .is_instruction = w->insn, .description = w->what };
+    }
+    /* alone: the boot pages plus its own; with the open gate: room for both */
+    int ok = og_pages_ok ? og_reserve(OG_ALL_PAGES, OG_ALL_L2)
+                         : og_reserve(OG_BOOT_PAGES + OG_PLAYER_PAGES, OG_BOOT_L2 + OG_PLAYER_L2);
+    if (!ok) { og_player_why = "Not enough memory for the patches"; return 0; }
+    int e = apply_patches(p, COUNT(p));
+    og_log("player: apply %x", e);
+    if (e) { og_player_why = e == E_PATCH_TOO_MANY_PATCHES ? "Too many ML patches active" : "ROM patch refused"; return 0; }
+    og_player_in = 1;
+    og_player_why = "";
+    return 1;
+}
+
+static void og_player_remove(void)
+{
+    for (int i = COUNT(og_player_words) - 1; i >= 0; i--)
+    {
+        int e = unpatch_memory(og_player_words[i].addr);
+        if (e) og_log("player: unpatch %08x: %x", og_player_words[i].addr, e);
+    }
+    og_player_in = 0;
+    og_log("player: removed");
+}
+
+static void og_player_step(void)
+{
+    if (!og_player == !og_player_in || !og_player_can_change()) return;
+    if (!og_player) { og_player_remove(); return; }
+    if (og_player_apply())
+        NotifyBox(2000, "Open gate clips: playback ON");
+    else
+    {
+        og_player = 0;
+        NotifyBox(5000, "Open gate playback refused:\n%s", og_player_why);
+    }
 }
 
 /* ------------------------------------------------------------------------
@@ -821,6 +898,7 @@ static void og_step(void)
     }
     og_observe_setting();
     og_finish_deferred();
+    og_player_step();
 
     switch (og_state)
     {
@@ -935,6 +1013,14 @@ static MENU_UPDATE_FUNC(og_update)
         MENU_SET_WARNING(MENU_WARN_INFO, "Recording: changes wait until it stops.");
 }
 
+static MENU_UPDATE_FUNC(og_player_update)
+{
+    if (!og_player != !og_player_in)
+        MENU_SET_WARNING(MENU_WARN_INFO, "Takes effect in LiveView (not in playback or while recording).");
+    else if (!og_player && og_player_why[0])
+        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Refused: %s", og_player_why);
+}
+
 static struct menu_entry og_menu[] =
 {
     {
@@ -946,6 +1032,14 @@ static struct menu_entry og_menu[] =
         .help2   = "Canon: 4K 25/29.97/23.98p, 10-bit, crop OFF. Enter movie, then photo mode once.",
         .submenu_width = 650,
         .children = (struct menu_entry[]) {
+            {
+                .name   = "Play open gate clips",
+                .priv   = &og_player,
+                .max    = 1,
+                .update = og_player_update,
+                .help   = "Experimental: Canon's player opens 4096x2736 clips. OFF at every boot.",
+                .help2  = "Set in LiveView. Don't use frame grab, trim or resize on these clips.",
+            },
             {
                 .name   = "Debug log",
                 .priv   = &og_debug,
@@ -986,6 +1080,7 @@ static unsigned int og_deinit(void)
     if (take_semaphore(og_lock, 1000) == 0)
     {
         if (og_removal_needed() && og_safe_point()) og_remove();
+        if (og_player_in && og_player_can_change()) og_player_remove();
         give_semaphore(og_lock);
     }
     return 0;
