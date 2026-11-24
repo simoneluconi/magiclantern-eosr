@@ -1156,37 +1156,10 @@ static int og_bad_samples;
 
 /* movie LV with the patches in: the live state must be the open-gate one. If it is not,
  * the patches are removed at the next safe point and the entry is turned off */
-/* HEAD BUF_A level (BUFA.md): the intermittent Err 70 is "HEAD ERROR >>> BUF_A", the on-chip
- * FIFO between the HEAD and the SAP chain overflowing on a short downstream stall. Mode 9's
- * full-height bursts are 23 % longer than stock 4K50's. Canon sets the level D2410530 = 0xDFC
- * at every CapIF setup (E0889B12); in the open-gate movie LV the worker raises it to 0xFFF,
- * the field's maximum, and re-raises it after each Canon setup. Only from Canon's own value,
- * nothing else is touched. The result shows in Canon's ring ("BUF_A [status]") if it recurs */
-#define OG_BUFA_LEVEL      0xD2410530
-#define OG_BUFA_LEVEL_STOCK 0xDFC
-#define OG_BUFA_LEVEL_OG    0xFFF
-
-static void og_bufa_level(int entry)
-{
-    static uint32_t last = 0xFFFFFFFF;
-    if (entry) last = 0xFFFFFFFF;
-    if (og_capmode() != OG_CAPMODE_4K30 || og_slot() != OG_SLOT_FULL || og_lv_suspended()) return;
-    volatile uint32_t * reg = (volatile uint32_t *) OG_BUFA_LEVEL;
-    uint32_t old = *reg;
-    if (old == OG_BUFA_LEVEL_STOCK) *reg = OG_BUFA_LEVEL_OG;
-    uint32_t now = *reg;
-    if (old != last || now != last)     /* each Canon re-setup, and a value that doesn't stick */
-    {
-        last = now;
-        og_log("BUF_A level D2410530: %x -> %x", old, now);
-    }
-}
-
 static void og_check_live(void)
 {
     if (!lv || og_path() != OG_PATH_MOVIE) { og_active_since = 0; og_bad_samples = 0; return; }
-    if (!og_active_since) { og_active_since = get_ms_clock(); og_bufa_level(1); return; }
-    og_bufa_level(0);
+    if (!og_active_since) { og_active_since = get_ms_clock(); return; }
     if (get_ms_clock() - og_active_since < 1500) return;
     int cap = og_capmode(), slot = og_slot(), vd = og_rd(OG_IMGCTRL + 0x10);
     const struct og_rate * live = og_rate_of_col(og_rd(OG_TIMING_INFO + 0x24));
