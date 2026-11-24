@@ -59,9 +59,11 @@ static struct semaphore * og_lock;      /* worker task vs. property handler remo
  * debug log (off by default; one line per event, never from a property handler)
  * ------------------------------------------------------------------------ */
 
+static volatile int og_in_handler;      /* set while a property handler runs: no file access */
+
 static void og_log(const char * fmt, ...)
 {
-    if (!og_debug) return;
+    if (!og_debug || og_in_handler) return;
     char buf[200];
     va_list ap;
     va_start(ap, fmt);
@@ -301,98 +303,7 @@ static int og_restore_ram(int include_deferred)
  * Canon's stock inputs and must reproduce the stock record exactly.
  * ------------------------------------------------------------------------ */
 
-#define OG_VF_MAX 48
-
-/* every vertical field of the develop record from the input bands (pipe 0 offsets) */
-static int og_vfields(uint32_t b0, uint32_t b1, uint16_t * off, uint32_t * val)
-{
-    int n = 0;
-    #define VF(o, v) do { off[n] = (o); val[n] = (v); n++; } while (0)
-    VF(0x1DC, b0 + 23); VF(0x1E4, b1 + 23);          /* s0 V */
-    VF(0x204, b0 + 23); VF(0x20C, b1 + 23);          /* s1 V */
-    VF(0x234, b0 + 22); VF(0x244, b1 + 24);          /* s1 window ends */
-    VF(0x254, b0 + 21); VF(0x25C, b1 + 21);          /* s3 V */
-    VF(0x274, b0 + 21); VF(0x27C, b1 + 21);          /* s5 V */
-    VF(0x2A4, b0 + 21); VF(0x2B4, b1 + 21);          /* s5 window ends */
-    uint32_t r0 = (b0 + 30 + 7) / 8, r1 = (b1 + 30 + 7) / 8;
-    VF(0x33C, 8 * r0 + 7); VF(0x344, 8 * r1 + 7);    /* s11: pyramid input */
-    VF(0x36C, 14 + b0 + 21); VF(0x37C, 30 + b1 + 21);/* s11 window ends */
-    static const uint16_t lv1_0[5] = { 0x2C4, 0x2FC, 0x31C, 0x398, 0x3C8 };
-    static const uint16_t lv1_1[5] = { 0x2CC, 0x304, 0x324, 0x3A0, 0x3D8 };
-    for (int i = 0; i < 5; i++) { VF(lv1_0[i], r0); VF(lv1_1[i], r1); }   /* 1/8 level */
-    uint32_t l2_0 = r0 + 4 + (1 - (r0 + 4) % 2), l2_1 = r1 + 4 + (1 - (r1 + 4) % 2);
-    VF(0x428, l2_0); VF(0x430, l2_1);                /* s17 V */
-    VF(0x458, r0 + 4); VF(0x468, r1 + 8);            /* s17 window ends */
-    uint32_t s0 = (l2_0 - 1) / 2, s1 = (l2_1 - 1) / 2;
-    static const uint16_t l2s_0[4] = { 0x3E8, 0x408, 0x484, 0x4B4 };
-    static const uint16_t l2s_1[4] = { 0x3F0, 0x410, 0x48C, 0x4C4 };
-    for (int i = 0; i < 4; i++) { VF(l2s_0[i], s0); VF(l2s_1[i], s1); }   /* s13, s15, s18 */
-    VF(0x4D4, s1 / 8); VF(0x4DC, s1 / 8);            /* s19 V */
-    VF(0x524, s0 + 8); VF(0x534, s1 + 8);            /* s21 window ends */
-    #undef VF
-    return n;
-}
-
-/* pyramid EDMAC descriptors: rows per band and band jumps (pipe 0 offsets) */
-static int og_vdma(uint32_t b0, uint32_t b1, uint16_t * off, uint32_t * val)
-{
-    int n = 0;
-    uint32_t r0 = (b0 + 30 + 7) / 8, r1 = (b1 + 30 + 7) / 8;
-    uint32_t l2_0 = r0 + 4 + (1 - (r0 + 4) % 2), l2_1 = r1 + 4 + (1 - (r1 + 4) % 2);
-    uint32_t s0 = (l2_0 - 1) / 2, s1 = (l2_1 - 1) / 2;
-    #define VD(o, v) do { off[n] = (o); val[n] = (uint32_t) (v); n++; } while (0)
-    VD(0x90, r0); VD(0x98, r1);
-    VD(0x74, -(int32_t) (1370 * r0 + 22)); VD(0x7C, -(int32_t) (1370 * r1 + 22));
-    VD(0xCC, s0); VD(0xD4, s1);
-    VD(0xB0, -(int32_t) (686 * s0 + 20)); VD(0xB8, -(int32_t) (686 * s1 + 20));
-    #undef VD
-    return n;
-}
-
-/* scale block of one pipe (u16 output bands, start, last-band phase, step, 2^27/Vout) */
-struct og_scale { uint16_t n1, n2; uint32_t start_i, start_r, phase_i, phase_r, step_i, step_r, recip; };
-
-static struct og_scale og_scale_rule(uint32_t vin, uint32_t vout, uint32_t b0)
-{
-    struct og_scale s;
-    uint32_t n1 = b0;
-    while (n1 > 0 && ((2 * n1 + 1) * vin >= (2 * b0 + 3) * vout || (n1 & 1))) n1--;
-    uint32_t two_out = 2 * vout, P = 2 * vin * (1 + 2 * n1);
-    s.n1 = n1; s.n2 = vout - n1;
-    s.start_i = (2 * vin) / two_out; s.start_r = (2 * vin) % two_out;
-    s.phase_i = P / two_out - 2 * (b0 - 3); s.phase_r = P % two_out;
-    s.step_i = (4 * vin) / two_out; s.step_r = (4 * vin) % two_out;
-    s.recip = ((1u << 27) + vout / 2) / vout;
-    return s;
-}
-
-static int og_scale_matches(const uint8_t * pipe, const struct og_scale * s)
-{
-    return *(uint16_t *) (pipe + 0x8EE) == s->n1 && *(uint16_t *) (pipe + 0x8F0) == s->n2
-        && *(uint32_t *) (pipe + 0x918) == s->start_i && *(uint32_t *) (pipe + 0x91C) == s->start_r
-        && *(uint32_t *) (pipe + 0x924) == s->phase_i && *(uint32_t *) (pipe + 0x928) == s->phase_r
-        && *(uint32_t *) (pipe + 0x93C) == s->step_i && *(uint32_t *) (pipe + 0x940) == s->step_r
-        && *(uint32_t *) (pipe + 0x944) == s->recip;
-}
-
-static void og_scale_write(uint8_t * pipe, const struct og_scale * s)
-{
-    *(uint16_t *) (pipe + 0x8EE) = s->n1;
-    *(uint16_t *) (pipe + 0x8F0) = s->n2;
-    *(uint32_t *) (pipe + 0x918) = s->start_i;
-    *(uint32_t *) (pipe + 0x91C) = s->start_r;
-    *(uint32_t *) (pipe + 0x924) = s->phase_i;
-    *(uint32_t *) (pipe + 0x928) = s->phase_r;
-    *(uint32_t *) (pipe + 0x93C) = s->step_i;
-    *(uint32_t *) (pipe + 0x940) = s->step_r;
-    *(uint32_t *) (pipe + 0x944) = s->recip;
-}
-
-static uint32_t og_gcd(uint32_t a, uint32_t b)
-{
-    while (b) { uint32_t t = a % b; a = b; b = t; }
-    return a;
-}
+#include "og_rules.h"
 
 /* ------------------------------------------------------------------------
  * geometry of the mode (one instance; a native-resolution mode would be another)
@@ -659,37 +570,55 @@ static int og_removal_needed(void)
     return og_state == OG_APPLIED || og_state == OG_ACTIVE || og_state == OG_REMOVING;
 }
 
+static volatile int og_removed_by_handler;
+
+/* the caller holds og_lock (worker task, or og_setting_lost below) */
+static int og_lost_locked(const char * why)
+{
+    og_setting_col = 0;
+    og_setting_changed = 1;
+    if (!og_removal_needed() || RECORDING) return 0;
+    og_remove();
+    og_reason = why;
+    og_state = og_ui ? OG_ARMED : OG_OFF;
+    return 1;
+}
+
+/* from a property handler (task context): remove at once, under the lock */
 static void og_setting_lost(const char * why)
 {
     og_setting_col = 0;
     og_setting_changed = 1;
     if (!og_removal_needed() || RECORDING) return;
     if (take_semaphore(og_lock, 1000) != 0) return;
-    if (og_removal_needed() && !RECORDING)
-    {
-        og_remove();
-        og_reason = why;
-        og_state = og_ui ? OG_ARMED : OG_OFF;
-    }
+    if (og_lost_locked(why)) og_removed_by_handler = 1;
     give_semaphore(og_lock);
 }
 
 static uint32_t og_vmode[4];
+static volatile int og_vmode_changes;   /* logged by the worker (debug) */
 
 PROP_HANDLER(PROP_VIDEO_MODE)
 {
-    const uint32_t * b = (const uint32_t *) buf;
+    og_in_handler = 1;
     int n = MIN(len / 4, 4);
     int changed = 0;
     for (int i = 0; i < n; i++)
-        if (og_vmode[i] != b[i]) { og_vmode[i] = b[i]; changed = 1; }
-    if (changed) og_setting_lost("Movie size or fps changed");
+        if (og_vmode[i] != buf[i]) { og_vmode[i] = buf[i]; changed = 1; }
+    if (changed)
+    {
+        og_vmode_changes++;
+        og_setting_lost("Movie size or fps changed");
+    }
+    og_in_handler = 0;
 }
 
 PROP_HANDLER(PROP_HDMI_CHANGE)
 {
+    og_in_handler = 1;
     og_hdmi = buf[0];
     if (og_hdmi) og_setting_lost("HDMI connected");
+    og_in_handler = 0;
 }
 
 /* ------------------------------------------------------------------------
@@ -742,18 +671,30 @@ static void og_check_live(void)
     {
         og_log("live check failed: capmode %x slot %d VD %d", cap, slot, vd);
         NotifyBox(5000, "Open gate: unexpected movie mode,\nturned off. Check the movie size.");
-        og_setting_lost("Unexpected movie mode");
+        og_lost_locked("Unexpected movie mode");
     }
-    else if (!ok && og_state == OG_APPLIED && get_ms_clock() - og_active_since > 4000)
+    else if (!ok && og_state == OG_APPLIED && get_ms_clock() - og_active_since > 4000 && !RECORDING)
     {
         og_log("live check failed after start: capmode %x slot %d VD %d", cap, slot, vd);
         NotifyBox(5000, "Open gate: not taking effect,\nturned off.");
-        og_setting_lost("Not taking effect");
+        og_lost_locked("Not taking effect");
     }
 }
 
 static void og_step(void)
 {
+    static int logged_vmode_changes;
+    if (og_vmode_changes != logged_vmode_changes)
+    {
+        logged_vmode_changes = og_vmode_changes;
+        og_log("PROP_VIDEO_MODE %x %x %x %x (path %x)", og_vmode[0], og_vmode[1], og_vmode[2], og_vmode[3], og_path());
+    }
+    if (og_removed_by_handler)
+    {
+        og_removed_by_handler = 0;
+        og_log("removed by a property change: %s", og_reason);
+        NotifyBox(4000, "Open gate turned off:\n%s", og_reason);
+    }
     og_observe_setting();
     og_finish_deferred();
 
