@@ -905,9 +905,27 @@ static void og_observe_setting(void)
 /* after a boot in photo mode: reuse the setting of the last session, only if Canon's
  * movie setting (posted at boot) is the one seen with it. Movie settings change only in
  * movie mode, where the module observes them */
+/* Canon posts the setting once at boot, before modules are loaded: the core keeps it
+ * (src/propvalues.c). Taken once, if no posting reached the module yet */
+static void og_seed_from_core(void)
+{
+    static int done;
+    if (done || og_mcp_calls) return;
+    if (video_mode_fps_x100 <= 0 || video_mode_size_code < 0) return;
+    done = 1;
+    og_crop = video_mode_movie_crop;
+    /* the readout and the 24.00p flag are not kept by the core: crop gives the readout,
+     * and 24.00p is told apart by its exact rate (2400, no supported rate) */
+    og_mcp = (struct og_mcp) { video_mode_fps_x100, video_mode_size_code,
+                               og_crop ? 4 : OG_MCP_READOUT_FULL, 0 };
+    og_mcp_calls = 1;
+    og_log("setting from the core at boot: fps %d size %d crop %d", og_mcp.fps100, og_mcp.size, og_crop);
+}
+
 static void og_recall_setting(void)
 {
     static int done;
+    og_seed_from_core();
     if (done || !og_mcp_calls) return;   /* once, after the boot delivery of the property */
     done = 1;
     if (og_setting_col) return;
@@ -1005,8 +1023,8 @@ static void og_debug_step(void)
     if (!logged_core && get_ms_clock() > 3000)
     {
         logged_core = 1;
-        og_log("core at boot: size code %d fps %d movie crop %d (module calls %d)",
-               video_mode_size_code, video_mode_fps, video_mode_movie_crop, og_mcp_calls);
+        og_log("core at boot: size code %d fps %d (x100 %d) movie crop %d (module calls %d)",
+               video_mode_size_code, video_mode_fps, video_mode_fps_x100, video_mode_movie_crop, og_mcp_calls);
     }
     static int logged_calls;
     if (!og_mcp_calls && !logged_calls && get_ms_clock() > 15000)
