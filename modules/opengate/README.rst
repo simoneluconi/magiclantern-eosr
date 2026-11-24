@@ -26,10 +26,9 @@ Limits
 ------
 
 The sensor runs like 4K 50p (more heat), the rolling shutter is that of a
-full-height read, no 50/60p, HDMI output refused. Canon's in-camera movie
-edit does not accept the clips; Canon's player shows them only with the test
-option "Play open gate clips" (top 2160 rows, stretched): play them on a
-computer. Not together with the fps24 module (24.00p).
+full-height read, no 50/60p, HDMI output refused. Canon's player and
+in-camera movie edit do not accept the clips: play them on a computer.
+Not together with the fps24 module (24.00p).
 
 Debug log: ML/LOGS/OPENGATE.LOG (events, Canon's movie settings, DryOS
 asserts).

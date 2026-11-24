@@ -264,45 +264,6 @@ static const struct og_word og_enc_words[] =
 #define OG_BOOT_L2      6
 static const uint8_t og_reserve_steps[][2] = { { 10, 8 }, { 14, 10 }, { 17, 12 } };
 
-/* ---- Canon's player and the 4096x2736 clips (research/opengate/player/PLAYER-2736.md) ----
- * P1 ChkFrameRate accepts 4096 x any height; P2 the playback size index maps it to
- * 4096x2160 (else an assert); P3 4 decoded frames instead of 6 (2752-row frames fit the
- * buffers sized for six 2160-row ones). Camera: decode and ORCA convert handle 2752 rows,
- * the ORCA resize of a 2752-row source stops the camera. So the two heights the resize
- * sees are clamped to 2160 (section 13): C2 in the resize setup, C1 at the resize input,
- * both calling clamps in MVP_GetMovieSize E04EF1F4, which has no caller (cave). The clip
- * then reaches the resize like a DCI 4096x2160 one: its top 2160 rows, stretched to the
- * 3:2 box. Clips 2160 rows or shorter are unchanged. Words from player/cave.py */
-static const struct og_word og_player_p1[] =
-    { { 0xE04EB9F8, 0xD11542A1, 0xBF0042A1, 1, "OG player ChkFrameRate any height" } };  /* bne -> nop */
-static const struct og_word og_player_p2[] =
-    { { 0xE04EFB84, 0x2000D005, 0x2000E005, 1, "OG player 4096 x any -> index 2" } };    /* beq -> b */
-static const struct og_word og_player_p3[] =
-    { { 0xE0401B84, 0x61A82006, 0x61A82004, 1, "OG player 4 decoded frames" } };         /* movs r0,#6 -> #4 */
-static const struct og_word og_player_c2[] =                  /* ldr.w r0,[r4,#0x9C4] -> bl cave A */
-    { { 0xE0403244, 0x09C4F8D4, 0xFFD6F0EB, 1, "OG player resize setup h <= 2160" } };
-static const struct og_word og_player_c1[] =                  /* ldr r0,[r7,#4]; str r0,[sp,#8] -> bl cave B */
-{
-    { 0xE0405230, 0x68789001, 0xF0E99001, 1, "OG player resize input h <= 2160" },
-    { 0xE0405234, 0x69789002, 0x6978FFE7, 1, "OG player resize input h <= 2160" },
-};
-static const struct og_word og_player_cave[] =                /* A: r0 = min([r4+0x9C4], 2160); B: [sp+8] = min([r7+4], 2160) */
-{
-    { 0xE04EF1F4, 0xF04FB510, 0x09C4F8D4, 1, "OG player clamp cave" },
-    { 0xE04EF1F8, 0x680034FF, 0x6F07F5B0, 1, "OG player clamp cave" },
-    { 0xE04EF1FC, 0x19C0F8D0, 0xF44FBF88, 1, "OG player clamp cave" },
-    { 0xE04EF200, 0x6F70F5B1, 0x47706007, 1, "OG player clamp cave" },
-    { 0xE04EF204, 0xF5B1D003, 0xF5B06878, 1, "OG player clamp cave" },
-    { 0xE04EF208, 0xD0076FF0, 0xBF886F07, 1, "OG player clamp cave" },
-    { 0xE04EF20C, 0xF8D0E00C, 0x6007F44F, 1, "OG player clamp cave" },
-    { 0xE04EF210, 0xF5B119C4, 0x47709002, 1, "OG player clamp cave" },
-};
-/* pages E04E0000 and E0400000 (section E04, inside the open gate's 12 L2 tables): with the
- * open gate 17 + 2 = 19 runtime pages; alone, the port's 6 boot pages + 2 */
-#define OG_PLAYER_PAGES_ALL  19
-#define OG_PLAYER_PAGES_ONLY (OG_BOOT_PAGES + 2)
-#define OG_PLAYER_L2_ONLY    (OG_BOOT_L2 + 1)
-
 /* the fps24 module patches this word (Canon's 24.00p row caption, stock 0) */
 #define OG_FPS24_ROW_WORD 0xE1F107D0
 
