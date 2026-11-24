@@ -1,0 +1,14 @@
+Audio
+~~~~~
+
+Speaker Volume
+``````````````
+
+Volume of ML's beeps, 1 to 5.
+
+Beep, test tones
+````````````````
+
+ML beeps after a screenshot, on motion detect and from scripts. Q: turn the beeps off (the LED blinks instead), change the tone, test it.
+
+No beep while recording, or with Canon's Beep setting off.

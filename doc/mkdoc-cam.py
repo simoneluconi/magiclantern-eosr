@@ -1,38 +1,74 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # Render the user guide in BMP format (with RLE compression)
 # in order to use it as a help system in the camera menu.
 # Outputs: a lot of files in cam/ subdirectory
-# (page-%03d.bmp for each page, and menuidx.dat)
+# (page-%03d.bmh for each page, and menuidx.dat)
+#
+# Default: the full user guide (MANUAL.txt + MN-*.txt), into cam/.
+#
+# A camera can have its own short guide instead:
+#   python3 mkdoc-cam.py --guide r6cam --out ../platform/R6.190/doc --ml-palette --no-antialias
+# reads r6cam/index.txt (the list of sources) and r6cam/ug-template-cam.tex.
+#
+# Needs: python3 with docutils, numpy and PIL, lualatex (TeX Live),
+# pdftoppm (poppler-utils), ruby; pandoc for the full guide only.
 
 # Author: Alex Dumitrache <broscutamaker@gmail.com>
 # License: GPL
 
-import os, re, time, sys
-import urllib
+import os, re, sys, glob, shutil, argparse
+import urllib.parse
+
+import numpy as np
+from PIL import Image
 
 from mkdoc_utils import system_or_exit
 from mkdoc_utils import include
 from mkdoc_utils import sed_sub_tex_spec_chars
+from menuindex import write_menu_index
 
-rst2latex = os.getenv("RST2LATEX", "rst2latex.py")
+parser = argparse.ArgumentParser(description="Render the in-camera help pages")
+parser.add_argument("--guide", metavar="DIR",
+    help="build the guide from DIR/index.txt and DIR/ug-template-cam.tex, instead of the full user guide")
+parser.add_argument("--out", metavar="DIR", default="cam",
+    help="output directory (default: cam)")
+parser.add_argument("--ml-palette", action="store_true",
+    help="match colors to ML's own palette (indexed2rgbLUT in src/bmp.c, for FEATURE_VRAM_RGBA cameras) "
+         "instead of Canon's (data/vram/Palette.jpg)")
+parser.add_argument("--no-antialias", action="store_true",
+    help="render the text without antialiasing (about half the size)")
+parser.add_argument("--tex-only", action="store_true",
+    help="stop after lualatex (the rest is slow)")
+args = parser.parse_args()
+
+rst2latex = os.getenv("RST2LATEX") or shutil.which("rst2latex.py") or "rst2latex"
+template = "ug-template-cam.tex"
+outdir = args.out
 
 o = open("userguide.rst", "w")
-print >> o, """Magic Lantern v2.3
+if args.guide:
+    template = os.path.join(args.guide, template)
+    for l in open(os.path.join(args.guide, "index.txt")).readlines():
+        l = l.strip()
+        if l and not l.startswith("#"):
+            include(o, os.path.join(args.guide, l))
+else:
+    o.write("""Magic Lantern v2.3
 ==================================
 
-"""
-include(o, "MANUAL.txt", 1);
-include(o, "MN-AUDIO.txt");
-include(o, "MN-EXPO.txt");
-include(o, "MN-OVERLAY.txt");
-include(o, "MN-MOVIE.txt");
-include(o, "MN-SHOOT.txt");
-include(o, "MN-FOCUS.txt");
-include(o, "MN-DISPLAY.txt");
-include(o, "MN-PREFS.txt");
-include(o, "MN-DEBUG.txt");
-include(o, "EPILOGUE.txt");
+""")
+    include(o, "MANUAL.txt", 1);
+    include(o, "MN-AUDIO.txt");
+    include(o, "MN-EXPO.txt");
+    include(o, "MN-OVERLAY.txt");
+    include(o, "MN-MOVIE.txt");
+    include(o, "MN-SHOOT.txt");
+    include(o, "MN-FOCUS.txt");
+    include(o, "MN-DISPLAY.txt");
+    include(o, "MN-PREFS.txt");
+    include(o, "MN-DEBUG.txt");
+    include(o, "EPILOGUE.txt");
 
 o.close()
 
@@ -57,10 +93,10 @@ def fixwikilinks(file):
         m = re.search(r"\[\[([^]|]+)([^]]*)\]\]", txt, re.MULTILINE)
         if not m: break
         origstr = "[[" + m.groups()[0] + m.groups()[1] + "]]"
-        print origstr
+        print(origstr)
         x = m.groups()[0]
         x = x.replace("_", " ")
-        txt = txt.replace(origstr, "`%s <http://magiclantern.wikia.com/wiki/%s>`_" % (x, urllib.quote(x)))
+        txt = txt.replace(origstr, "`%s <http://magiclantern.wikia.com/wiki/%s>`_" % (x, urllib.parse.quote(x)))
 
     #~ sub("INSTALL.rst", , ")
 
@@ -112,7 +148,7 @@ def should_add_newline(l):
 def add_menu_items_to_contents(file):
     txt = ""
     for l in open(file).readlines():
-        m = re.match("^\*\*(.*)\*\*\ *$", l)
+        m = re.match(r"^\*\*(.*)\*\*\ *$", l)
         if m and should_add_newline(l):
             txt += r"""
 .. raw:: latex
@@ -134,18 +170,20 @@ def add_menu_items_to_contents(file):
 
 system_or_exit(r"sed -i -e s/.*{{.*}}.*//g userguide.rst")
 
-system_or_exit("pandoc -f rst -t latex -o credits.tex CREDITS.txt")
+if not args.guide:
+    system_or_exit("pandoc -f rst -t latex -o credits.tex CREDITS.txt")
 
 fixwikilinks("userguide.rst")
 #~ labelhack("userguide.rst")
 #~ add_menu_items_to_contents("userguide.rst")
-#system_or_exit("pandoc -f rst -t latex -o userguide-body.tex userguide.rst")
 system_or_exit(r"sed -i -e 's/^#.*$//g' userguide.rst")
-system_or_exit("%s userguide.rst --output-encoding=utf8 --template=ug-template-cam.tex --table-style booktabs > UserGuide-cam.tex" % (rst2latex,))
+system_or_exit("%s userguide.rst --output-encoding=utf8 --template=%s --table-style booktabs > UserGuide-cam.tex" % (rst2latex, template))
 system_or_exit("sed -i -e \"/\\\\label{[^}]*}%$/d\" UserGuide-cam.tex")
-#~ system_or_exit(r"sed -i -e 's/\\{\\{.*\\}\\}//g' UserGuide-cam.tex")
-sub("UserGuide-cam.tex", r"\\subsubsection", r"\\newpage\\subsubsection")
-sub("UserGuide-cam.tex", r"\\subsection", r"\\newpage\\subsection")
+if not args.guide:
+    # full guide: one page for each menu entry
+    sub("UserGuide-cam.tex", r"\\subsubsection", r"\\newpage\\subsubsection")
+    sub("UserGuide-cam.tex", r"\\subsection", r"\\newpage\\subsection")
+# (a short guide has one page for each menu, see its template)
 
 system_or_exit(r"sed -i -e 's/width=10cm/width=7cm/g' UserGuide-cam.tex") # hack for liveview screen
 
@@ -159,52 +197,31 @@ replace("UserGuide-cam.tex", r"""\newpage\subsection*{\phantomsection%
   PLAY mode shortcuts%""", r"""\subsection*{\phantomsection%
   PLAY mode shortcuts%""");
 
-
-
-
-#~ system_or_exit(r"sed -i -e 's/\\addcontentsline{toc}{section}{Features}//g' UserGuide-cam.tex")
 system_or_exit("lualatex -interaction=batchmode UserGuide-cam.tex")
-#system_or_exit(r"sed -i 's/\\{\\{clr\\}\\}//g' userguide-body.tex")
-#os.system("pdflatex -interaction=batchmode UserGuide-cam.tex")
-#os.system("pdflatex -interaction=batchmode UserGuide-cam.tex")
 
-if len(sys.argv) > 1:
+if args.tex_only:
     raise SystemExit # from this point it's very slow
 
-os.system("rm cam/*")
-os.system("mkdir cam")
-execfile("menuindex.py")
+os.makedirs(outdir, exist_ok=True)
+for f in glob.glob(os.path.join(outdir, "*")):
+    os.remove(f)
 
-print 'pdf to png...'
-system_or_exit("pdftoppm -r 152.2 -png UserGuide-cam.pdf cam/page")
+# menuindex.txt (written by lualatex) -> menuidx.dat
+write_menu_index(outdir, menu_header = not args.guide)
+
+print('pdf to png...')
+system_or_exit("pdftoppm -r 152.2 %s -png UserGuide-cam.pdf %s/page" % ("-aa no -aaVector no" if args.no_antialias else "", outdir))
 
 # from remap.py
-from pylab import *
-import Image
 
-
-def read_ch(f):
-    M = zeros([16,16])[:,:,1]
-    im = imread(f)
-    h,w = im.shape
-    lw = w/16
-    lh = h/16
-    for i in range(16):
-        for j in range(16):
-            ia = i*lh+5
-            ib = (i+1)*lh-5
-            ja = i*lw+5
-            jb = (i+1)*lw-5
-            M[i,j] =  mean(im[ia:ib,ja:jb])
-    return M
-
+# Canon's palette, from a picture of it: 16x16 color patches
 def read_rgb(f):
-    M = zeros([16,16,3])
-    im = flipud(imread(f))
+    M = np.zeros([16,16,3])
+    im = np.flipud(np.asarray(Image.open(f).convert("RGB")))
     h,w,c = im.shape
     assert c==3
-    lw = w/16
-    lh = h/16
+    lw = w//16
+    lh = h//16
 
     for c in range(3):
         for i in range(16):
@@ -213,68 +230,81 @@ def read_rgb(f):
                 ib = (i+1)*lh-5
                 ja = j*lw+5
                 jb = (j+1)*lw-5
-                M[i,j,c] = mean(im[ia:ib,ja:jb,c])
+                M[i,j,c] = np.mean(im[ia:ib,ja:jb,c])
     return M
 
-rgb2ind_cache = {}
-def rgb2ind(rgb, mf):
-    trgb = tuple(rgb)
-    if trgb in rgb2ind_cache: return rgb2ind_cache[trgb]
+# ML's palette on cameras with a RGBA display buffer (FEATURE_VRAM_RGBA):
+# indexed2rgbLUT from src/bmp.c, 0xAARRGGBB, with the generic values (#else)
+def read_ml_palette(f):
+    src = open(f).read()
+    m = re.search(r"indexed2rgbLUT\[RGB_LUT_SIZE\]\s*=\s*\{(.*?)\};", src, re.DOTALL)
+    assert m, "indexed2rgbLUT not found in %s" % f
+    lut = re.sub(r"#ifdef.*?#else", "", m.group(1), flags=re.DOTALL)  # camera-specific values
+    lut = re.sub(r"//[^\n]*", "", lut)
+    lut = [int(x, 16) for x in re.findall(r"0x[0-9a-fA-F]{8}", lut)]
+    assert len(lut) == 80, "expected 80 colors in indexed2rgbLUT, found %d" % len(lut)
+    M = np.zeros([256,3])
+    for i,argb in enumerate(lut):
+        M[i] = [(argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF]
+    return M.reshape((16,16,3))
 
-    dif = mf - rgb*ones((256,1))
+def rgb2ind(rgb, mf, usable):
+    dif = mf - rgb*np.ones((256,1))
     dif = (dif**2).sum(1)
+    dif[~usable] = 1e10
+    return np.argmin(dif)
 
-    dif[0] = 1e10
-    dif[3] = 1e10
-    dif[0x14] = 1e10
-    ind = argmin(dif[:80]) # only first 80 entries are safe
-
-    rgb2ind_cache[trgb] = ind
-
-    return ind
+def usable_colors(mf):
+    usable = np.zeros(256, dtype=bool)
+    usable[:80] = True  # only first 80 entries are safe
+    usable[0] = False   # transparent
+    usable[3] = False
+    usable[0x14] = False
+    return usable
 
 def remap_rgb(im,M):
     h,w,c = im.shape
     assert c==3
-    newim = zeros((h,w))
     mf = M.flatten().reshape((256,3))
-    for i in range(h):
-        for j in range(w):
-            rgb = im[i,j]
-            ind = rgb2ind(rgb, mf)
-            newim[i,j] = ind
-    return newim
+    usable = usable_colors(mf)
+    # match each distinct color once
+    packed = (im[:,:,0].astype(np.uint32) << 16) | (im[:,:,1].astype(np.uint32) << 8) | im[:,:,2]
+    colors, inverse = np.unique(packed, return_inverse=True)
+    ind = np.array([rgb2ind(np.array([p >> 16, (p >> 8) & 0xFF, p & 0xFF]), mf, usable) for p in colors])
+    return ind[inverse].reshape((h,w))
 
 def save_img(im,M,file):
-    ix = Image.fromarray(flipud(im.astype(uint8)))
+    ix = Image.fromarray(np.flipud(im.astype(np.uint8)), "P")
     mf = M.flatten().reshape((256,3))
-    ix.putpalette(mf.flatten().astype(uint8))
+    ix.putpalette(mf.flatten().astype(np.uint8).tolist())
     ix.save(file)
 
 
-M = read_rgb("../data/vram/Palette.jpg")
+if args.ml_palette:
+    M = read_ml_palette("../src/bmp.c")
+else:
+    M = read_rgb("../data/vram/Palette.jpg")
 for i in range(3):
-    print M[:,:,i].astype(uint8)
+    print(M[:,:,i].astype(np.uint8))
 
 def convert_page(k):
-    png = "cam/page-%03d.png" % k
-    if not os.path.isfile(png): png = "cam/page-%02d.png" % k
+    png = "%s/page-%03d.png" % (outdir, k)
+    if not os.path.isfile(png): png = "%s/page-%02d.png" % (outdir, k)
+    if not os.path.isfile(png): png = "%s/page-%d.png" % (outdir, k)
     if not os.path.isfile(png):
-        print "done?"
+        print("done?")
         raise SystemExit
-    bmp = "cam/page-%03d.bmp" % k
-    bmh = "cam/page-%03d.bmh" % k
+    bmp = "%s/page-%03d.bmp" % (outdir, k)
+    bmh = "%s/page-%03d.bmh" % (outdir, k)
 
-    print "remapping %s..." % png
-    im = flipud(imread(png))
-    if im.max() <= 1: im *= 255
+    print("remapping %s..." % png)
+    im = np.flipud(np.asarray(Image.open(png).convert("RGB")))
     imr = remap_rgb(im,M)
-    #print imr
     save_img(imr[1:481,0:720],M,bmp)
     system_or_exit("ruby ../src/convertrle.rb %s" % bmp)
-    system_or_exit("rm %s" % bmp)
-    system_or_exit("rm %s" % png)
-    system_or_exit("mv %s.rle %s" % (bmp, bmh))
+    os.remove(bmp)
+    os.remove(png)
+    os.rename(bmp + ".rle", bmh)
 
 for i in range(1,1000):
     convert_page(i)

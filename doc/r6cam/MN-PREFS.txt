@@ -1,0 +1,17 @@
+Prefs
+~~~~~
+
+Config options
+``````````````
+
+ML's settings are in ``ML/SETTINGS`` on the card, saved at power off (**Config AutoSave**). Also **Save config now** and **Restore ML defaults**.
+
+Customize Menus
+```````````````
+
+Hide the entries you don't use, or collect favourites in My Menu.
+
+Lens Info Prefs
+```````````````
+
+Focus distance in metres or feet.

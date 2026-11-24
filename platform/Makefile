@@ -64,6 +64,9 @@ VERSION = $(BUILD_DATE).$(MODEL).$(FW_VERSION)
 # Location of files to turn into zip:
 ZIP_DIR = build/zip
 ZIP_MODULES_DIR = $(ZIP_DIR)/ML/modules
+# Help pages for ML/doc (menuidx.dat, page-NNN.bmh, see doc/mkdoc-cam.py);
+# a platform can have its own
+ML_HELP_DIR ?= $(TOP_DIR)/doc/cam
 # All modules go here before placing in zip file hierarchy,
 # for any post-module-build but per-cam, pre-zip processing:
 CAM_MODULES_DIR = $(BUILD_DIR)/modules
@@ -226,7 +229,7 @@ endif
 $(ZIP_DIR): | $(BUILD_DIR)
 	$(CP) $(TOP_DIR)/data/cropmks/*.bmp $(BUILD_DIR)/zip/ML/cropmks
 	$(CP) $(TOP_DIR)/data/vram/*.lut $(BUILD_DIR)/zip/ML/data
-	-$(CP) -v $(TOP_DIR)/doc/cam/* $(BUILD_DIR)/zip/ML/doc
+	-$(CP) -v $(ML_HELP_DIR)/* $(BUILD_DIR)/zip/ML/doc
 	$(CP) $(TOP_DIR)/data/fonts/*.rbf $(BUILD_DIR)/zip/ML/fonts
 	$(CP) $(TOP_DIR)/scripts/*.lua $(BUILD_DIR)/zip/ML/scripts
 	$(CP) $(TOP_DIR)/scripts/lib/*.lua $(BUILD_DIR)/zip/ML/scripts/lib

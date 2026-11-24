@@ -202,11 +202,14 @@ void menu_help_go_to_label(void* label, int delta)
     str_make_lowercase(label_adj);
 
     int prev = -1;
+    int last_page = 0;
     for (i = 0; i < size; i++)
     {
         if (buf[i] == '\n')
         {
             buf[i] = 0;
+            if (i > 0 && buf[i - 1] == '\r')
+                buf[i - 1] = 0; // index file saved with CR+LF line ends
             char* line_buf = &buf[prev+1];
 
             char* name = line_buf+4;
@@ -215,11 +218,16 @@ void menu_help_go_to_label(void* label, int delta)
 
             if(streq(name, label_adj))
                 page = pagenum;
-            help_pages = MAX(help_pages, pagenum);
+            last_page = MAX(last_page, pagenum);
 
             prev = i;
         }
     }
+
+    // the guide can be shorter than the initial guess: without this,
+    // turning past its last page asks for pages that are not on the card
+    if (last_page)
+        help_pages = last_page;
 
     fio_free(buf);
     

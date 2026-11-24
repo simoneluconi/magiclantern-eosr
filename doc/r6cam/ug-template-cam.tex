@@ -1,0 +1,107 @@
+% In-camera help for the EOS R6: template for mkdoc-cam.py --guide r6cam.
+% Same page format and menu index as ../ug-template-cam.tex; different
+% title page, larger text, menu entries share a page.
+\documentclass[11pt,a4paper,english]{article}
+\usepackage{fixltx2e} % LaTeX patches, \textsubscript
+\usepackage{babel}
+\usepackage{mathpazo}
+\usepackage{color}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{ifthen}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{newfile}
+
+% colors that are in ML's palette (src/bmp.c): dark gray, COLOR_CYAN, COLOR_YELLOW
+\definecolor{darkgray}{rgb}{0.07,0.07,0.07}
+\definecolor{cyan}{rgb}{0.125,0.733,0.851}
+\definecolor{yellow}{rgb}{0.82,0.753,0}
+
+\newlength{\DUtablewidth} % internal use in tables
+
+% the 'draft' option shows hyperlinks as plain text (no net on the camera)
+\usepackage[colorlinks=true,linkcolor=cyan,urlcolor=cyan,draft]{hyperref}
+
+% page size (should result in a readable font on a 720x480 bitmap)
+\usepackage[papersize={120mm, 81mm}, total={113mm, 73mm}, centering]{geometry}
+
+\pagestyle{empty}
+
+% sans serif font (easier to read on monitors)
+\renewcommand{\familydefault}{\sfdefault}
+
+% tight layout (camera screen is small)
+\setlength{\parskip}{0.8mm}
+\setlength{\parindent}{0mm}
+\raggedright
+\raggedbottom
+
+\makeatletter
+\def\@listi{\leftmargin\leftmargini \topsep 0.3mm \partopsep 0mm \parsep 0mm \itemsep 0.5mm}
+\let\@listI\@listi
+\setlength{\leftmargini}{5mm}
+
+% menu name: yellow title; menu entry: cyan, small space around it
+\renewcommand\section{\@startsection{section}{1}{\z@}{0mm}{1.5mm}{\normalfont\Large\bfseries\color{yellow}}}
+\renewcommand\subsection{\@startsection{subsection}{2}{\z@}{0mm}{1mm}{\normalfont\Large\bfseries\color{yellow}}}
+\renewcommand\subsubsection{\@startsection{subsubsection}{3}{\z@}{2.2mm}{0.2mm}{\normalfont\normalsize\bfseries\color{cyan}}}
+\makeatother
+
+% no section numbers (in the menu index either)
+\setcounter{secnumdepth}{0}
+
+% create a log file for index (like a table of context in binary format)
+\AtBeginDocument{\newoutputstream{menuindex}\openoutputfile{menuindex.txt}{menuindex}%
+    \addtostream{menuindex}{Index for Magic Lantern context-sensitive help in menu}
+}
+\AtEndDocument{\addtostream{menuindex}{\arabic{page} end document}\closeoutputstream{menuindex}}%
+
+% one page for each section and each menu; its entries share the page
+\let\oldsection=\section
+\def\section{\newpage\oldsection}
+\let\oldsubsection=\subsection
+\def\subsection{\newpage\oldsubsection}
+
+\pagecolor{darkgray}
+\color{white}
+
+%%% Body
+\begin{document}
+
+% page 1: development builds show their own page instead (src/menuhelp.c)
+\vspace*{12mm}
+\begin{center}
+{\Huge\bfseries Magic Lantern}
+
+\vspace{4mm}
+{\Large\color{yellow} Canon EOS R6, firmware 1.9.0}
+
+\vspace{8mm}
+Short guide to the features of this build.
+
+\vspace{3mm}
+Turn a dial to change page. SET goes back to the menu.
+\end{center}
+\newpage
+
+\def\tableofcontents{}
+
+% write a computer-readable table of contents, useful for context-sensitive help
+\let\oldaddcontentsline=\addcontentsline
+\renewcommand{\addcontentsline}[3]{\oldaddcontentsline{#1}{#2}{#3}\addtostream{menuindex}{\arabic{page} #2 #3}}
+
+% one more name for the current page: a menu entry that has no title of
+% its own, or a name that menuindex.py would cut (e.g. at " (")
+\newcommand{\helplabel}[1]{\addtostream{menuindex}{\arabic{page} label #1}}
+
+\let\oldtexttt=\texttt
+\renewcommand{\texttt}[1]{{\oldtexttt{\bfseries #1}}}
+
+% mkdoc-cam.py will write here the result from rst2latex
+$body
+
+\end{document}

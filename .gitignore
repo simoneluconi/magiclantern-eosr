@@ -90,6 +90,7 @@ developer_guide/developer_guide.pdf
 *.CR2
 *.cr2
 *.DAT
+!platform/*/doc/menuidx.dat
 ML/SETTINGS/
 BOOTFLAG.TXT
 

@@ -1,0 +1,12 @@
+Shoot
+~~~~~
+
+Motion Detect
+`````````````
+
+Takes a picture when the image changes. Photo mode, in LiveView. Q: trigger type, level, area size and delay. Opening the ML menu stops it.
+
+Shoot Preferences
+`````````````````
+
+**Pics at once**: pictures for each Motion Detect trigger.

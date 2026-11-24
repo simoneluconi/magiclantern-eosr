@@ -1,0 +1,12 @@
+Display
+~~~~~~~
+
+Red display
+```````````
+
+Screen and viewfinder in red, for night and astro: 100 to 12 %. Pictures and movies don't change.
+
+Advanced settings
+`````````````````
+
+**Color scheme** for ML's own graphics; Pure Red is for the night.

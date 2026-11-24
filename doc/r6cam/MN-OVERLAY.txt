@@ -1,0 +1,37 @@
+Overlay
+~~~~~~~
+
+On Canon's clean LiveView screen, also while recording. Not on HDMI.
+
+Global Draw
+```````````
+
+Main switch for all of ML's graphics in LiveView: bars and overlays.
+
+Cropmarks
+`````````
+
+Framing lines, from the bitmaps in ``ML/CROPMKS``. Q: choose one.
+
+Spotmeter
+`````````
+
+Brightness of a small spot. Q: unit and position.
+
+Overlay: exposure and colour
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+False color
+```````````
+
+A colour for each brightness level, to judge the exposure. Q: palette.
+
+Waveform
+````````
+
+Brightness across the image: white at the top, black at the bottom. Q: size.
+
+Vectorscope
+```````````
+
+Colours on a circle, neutral in the centre. For white balance and skin tones.

@@ -20,5 +20,8 @@ ML_BOOT_OBJ = boot-d678.o
 ML_SRC_EXTRA_OBJS += $(BUILD_DIR)/function_overrides.o
 ML_SRC_EXTRA_OBJS += $(BUILD_DIR)/faceyuv.o
 
+# short in-camera help for this camera, made from doc/r6cam
+ML_HELP_DIR = $(TOP_DIR)/platform/R6.190/doc
+
 include ../Makefile
 .DEFAULT_GOAL := $(BUILD_DIR)/cam_complete

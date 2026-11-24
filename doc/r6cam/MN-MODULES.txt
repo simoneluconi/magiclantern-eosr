@@ -1,0 +1,24 @@
+Modules
+~~~~~~~
+
+.. raw:: latex
+
+    \helplabel{Module}
+
+Extra features, loaded at start-up. **SET** turns a module ON; then restart the camera. **Q**: Module info, with how to use it.
+
+* **file_man**: Debug > File Manager.
+* **lua**: the Scripts tab.
+* **opengate**: Movie > Open gate 4K.
+* **fps24**: Movie > 24.00p.
+
+Trouble? Hold **SET** while switching on: no modules are loaded.
+
+Scripts
+~~~~~~~
+
+From the **lua** module: the ``.lua`` files in ``ML/scripts``.
+
+* **Q** on a script: **Run Script**. **Autorun** runs it at every power on.
+* **Show console**: what the scripts print.
+* Scripts that change camera settings or take pictures fail in this build.

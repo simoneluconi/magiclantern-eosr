@@ -1,0 +1,3 @@
+# in-camera help: binary pages, and an index the camera splits at "\n" only
+*.bmh binary
+menuidx.dat -text

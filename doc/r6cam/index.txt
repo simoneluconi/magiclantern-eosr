@@ -1,0 +1,15 @@
+# In-camera help for the EOS R6 (firmware 1.9.0): sources, in page order.
+# Build: see README.txt in this folder.
+#
+# Titles with `````` are menu entries: write the name exactly as in the
+# menu (.name in the code), the camera looks it up when INFO is pressed.
+# Titles with ------ or ~~~~~~ start a new 720x480 page (~~~~~~: a menu).
+MANUAL.txt
+MN-MOVIE.txt
+MN-OVERLAY.txt
+MN-SHOOT.txt
+MN-DISPLAY.txt
+MN-AUDIO.txt
+MN-DEBUG.txt
+MN-MODULES.txt
+MN-PREFS.txt

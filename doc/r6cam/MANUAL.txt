@@ -1,0 +1,24 @@
+Magic Lantern menu
+------------------
+
+.. raw:: latex
+
+    \helplabel{Press INFO}\helplabel{Press Q / PLAY}\helplabel{SET / main dial}\helplabel{SET at startup}\helplabel{Key Shortcuts}
+
+* **Trash**: open or close the ML menu.
+* **Top dial**: change tab. **Joystick**, **rear dial**: move.
+* **SET** or **joystick centre**: change the selected entry.
+* **Q**: open the submenu of the entry.
+* **INFO**: help for the entry. A dial changes page.
+
+Every ML feature starts OFF. A gray entry does not work in the current mode: the bottom line says why.
+
+In LiveView
+-----------
+
+ML draws on Canon's clean screen only (press INFO until the icons are gone), with **Overlay > Global Draw** ON. Not on HDMI.
+
+* **Top bar**: clock, quality, temperature, free space; in 4K movie mode, the minutes left on Canon's heat timer.
+* **Bottom bar**: exposure settings, focus distance, battery in %.
+
+**Format card**: Canon's format screen says **Format card, keep ML [INFO]** and ML stays on the card. Press INFO there to remove ML.

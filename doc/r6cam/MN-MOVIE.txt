@@ -1,0 +1,21 @@
+Movie
+~~~~~
+
+MOV/MP4 time limit
+``````````````````
+
+Longest clip, up to **59:59** (Canon: 29:59). High frame rate stays at 7:29. Heat can still stop a clip earlier. Don't trim long clips in the camera.
+
+Heat timer
+``````````
+
+**2x / 3x / 4x** slow down Canon's 4K overheat timer. The temperature sensors still stop the camera.
+
+Open gate 4K and 24.00p
+```````````````````````
+
+.. raw:: latex
+
+    \helplabel{24.00p (Canon row)}
+
+From the modules **opengate** (4096x2736, the whole sensor) and **fps24** (true 24.00p in 4K UHD). One at a time.

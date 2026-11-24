@@ -1,0 +1,49 @@
+Debug
+~~~~~
+
+Internal Temp
+`````````````
+
+Camera temperature. Q: all sensors, overheat status, heat timer, unit.
+
+Battery level
+`````````````
+
+Charge in % and time left (reliable after a 2 % drop).
+
+Screenshot - 10s
+````````````````
+
+Close the menu and wait for the beep: saves ``VRAMn.BMP`` with ML's graphics and the LiveView image, not Canon's icons.
+
+File Manager
+````````````
+
+From the **file_man** module: browse the card, copy, move, delete.
+
+Debug: diagnostics
+~~~~~~~~~~~~~~~~~~
+
+Show tasks and Show CPU usage
+`````````````````````````````
+
+Running tasks; CPU load in %.
+
+Shutter Count
+`````````````
+
+Shutter actions so far. Q: details.
+
+Lens info
+`````````
+
+What the lens reports: name, focal length, serial number.
+
+For developers
+``````````````
+
+.. raw:: latex
+
+    \helplabel{Show GUI events}\helplabel{Dump ROM and RAM}\helplabel{Dump image buffers}\helplabel{Memory patches}\helplabel{Show console}\helplabel{Modules debug}
+
+**Show GUI events**: button codes. **Dump ROM and RAM**, **Dump image buffers**: large files on the card. **Memory patches**, **Show console**, **Modules debug**: diagnostics.
