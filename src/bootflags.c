@@ -140,6 +140,10 @@ bootflag_write_bootblock( void )
     // The func using "pStgDev = NULL" is a good place to find the base pointer,
     // and check if the code refs base[0] or base[1].
     dev = (struct cf_device *) sd_device[0];
+#elif defined(SD_DEVICE_INDEX_A) && defined(SD_DEVICE_INDEX_B)
+    // two SD slots, one device struct each (consts.h)
+    dev = (struct cf_device *) sd_device[get_ml_card()->drive_letter[0] == 'A'
+                                         ? SD_DEVICE_INDEX_A : SD_DEVICE_INDEX_B];
 #else
     dev = (struct cf_device *) sd_device[1];
 #endif
@@ -180,7 +184,23 @@ bootflag_write_bootblock( void )
     else if (p.type == 7) // ExFAT
     {
         uint8_t* buffer = fio_malloc(512*24);
+        if (!buffer)
+        {
+            fio_free( block );
+            return 0;
+        }
         dev->read_block( dev, buffer, p.sectors_before_partition, 24 );
+
+        // only rewrite what was read back as an exFAT boot region
+        if (strncmp((const char*) buffer + 3, "EXFAT   ", 8) != 0
+            || strncmp((const char*) buffer + 512*12 + 3, "EXFAT   ", 8) != 0)
+        {
+            NotifyBox(2000, "Bootflag: no exFAT VBR at %d", p.sectors_before_partition);
+            msleep(2000);
+            fio_free( buffer );
+            fio_free( block );
+            return 0;
+        }
 
         int off1 = 130;
         int off2 = 122;
@@ -191,8 +211,15 @@ bootflag_write_bootblock( void )
         exfat_sum((uint32_t*)(buffer));
         exfat_sum((uint32_t*)(buffer+512*12));
 
-        dev->write_block( dev, buffer, p.sectors_before_partition, 24 );
+        int rc = dev->write_block( dev, buffer, p.sectors_before_partition, 24 );
         fio_free( buffer );
+        if (rc != 24)
+        {
+            NotifyBox(2000, "Bootflag write failed\np.type=%d, p.sec = %d, rc=%d", p.type, p.sectors_before_partition, rc);
+            msleep(2000);
+            fio_free( block );
+            return 0;
+        }
     }
     else
     {
