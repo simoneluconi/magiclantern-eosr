@@ -387,12 +387,14 @@ static void f24_hint(void)
 {
     int s = f24_stored();
     if (s == 1 && f24_target() && !f24_live())
-        NotifyBox(8000, "24.00p ready. Canon's 24.00p row is already Enable:\n"
-                        "set it to Disable and back to Enable once\n"
-                        "(Movie rec. quality), or change the frame rate and back.");
+        NotifyBox(8000, "24.00p ready.\n"
+                        "Canon's 24.00p row is already Enable:\n"
+                        "set it to Disable, then Enable again\n"
+                        "(Movie rec. quality).");
     else if (s == 0)
-        NotifyBox(5000, "24.00p ready: set Canon's 24.00p row to Enable\n"
-                        "(Movie rec. quality), with 4K UHD 23.98p.");
+        NotifyBox(5000, "24.00p ready.\n"
+                        "Set Canon's 24.00p row to Enable\n"
+                        "(Movie rec. quality), 4K UHD 23.98p.");
 }
 
 static void f24_task(void * unused)
