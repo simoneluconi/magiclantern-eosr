@@ -166,6 +166,64 @@ static int og_path(void)     { return og_rd(OG_Y2V + 0x64); }
 static int og_slot(void)     { return og_rd(OG_IMGCTRL + 8); }
 static int og_capmode(void)  { return og_rd(OG_FRAMEDATA + 0x24); }
 
+/* Canon's stored 24.00p setting (fps24 module, FPS24.md P4n): model+0x610, -1 unreadable */
+#define OG_CC_PTR     0x10C28
+#define OG_MODEL_OFF  0x34FC
+#define OG_24P_OFF    0x610
+static int og_24p_stored(void)
+{
+    uint32_t model = og_rd(og_rd(og_rd(OG_CC_PTR) + 8) + OG_MODEL_OFF);
+    return og_ram_ok(model, OG_24P_OFF + 4) ? (int) og_rd(model + OG_24P_OFF) : -1;
+}
+
+/* debug log only: Canon's DryosDebugMsg RAM ring (S = *0x52A8, "KUWA" handles at
+ * S+0x10/0x14/0x18; PLAYER-2736.md 9), written to ML/LOGS/OGASSERT.BIN by the worker
+ * right after an assert, in the OGDM format of player/dmring.py (as fps24's dump) */
+#define OG_DM_PTR    0x52A8
+#define OG_DM_S_LEN  0x348
+#define OG_DM_MAGIC  0x4157554B
+#define OG_DM_SLOT   0x54
+
+static uint32_t og_dm_ring(uint32_t s, int k, uint32_t * len)
+{
+    uint32_t h = og_rd(s + 0x10 + 4 * k);
+    if (!og_ram_ok(h, 0x80) || og_rd(h) != OG_DM_MAGIC) return 0;
+    uint32_t n = 0;
+    for (int sub = 0; sub < 2; sub++)
+    {
+        uint32_t off = og_rd(h + 4 * (2 + 15 * sub)), cnt = og_rd(h + 4 * (4 + 15 * sub));
+        if (off < 0x80 || off > 0x100000 || cnt > 0x4000) return 0;
+        n = MAX(n, off + cnt * OG_DM_SLOT);
+    }
+    if (!og_ram_ok(h, n)) return 0;
+    *len = n;
+    return h;
+}
+
+static int og_dm_dump(const char * name)
+{
+    uint32_t s = og_rd(OG_DM_PTR);
+    if (!og_ram_ok(s, OG_DM_S_LEN) || !og_rd(s + 0x0C)) return 0;
+    uint32_t h[3], n[3], nb = 1;
+    for (int k = 0; k < 3; k++) { h[k] = og_dm_ring(s, k, &n[k]); if (h[k]) nb++; }
+    FILE * f = FIO_CreateFile(name);
+    if (!f) return 0;
+    uint32_t hdr[4] = { 0x4D44474F, 1, s, nb };    /* "OGDM", version, S, blocks */
+    FIO_WriteFile(f, hdr, sizeof(hdr));
+    uint32_t b[2] = { s, OG_DM_S_LEN };
+    FIO_WriteFile(f, b, sizeof(b));
+    FIO_WriteFile(f, (void *) s, OG_DM_S_LEN);     /* FIO_WriteFile uses the uncached alias */
+    for (int k = 0; k < 3; k++)
+    {
+        if (!h[k]) continue;
+        b[0] = h[k]; b[1] = n[k];
+        FIO_WriteFile(f, b, sizeof(b));
+        FIO_WriteFile(f, (void *) h[k], n[k]);
+    }
+    FIO_CloseFile(f);
+    return nb;
+}
+
 static int og_in_4k_map(void)
 {
     uint32_t m = og_rd(OG_MEMNAV + 8);
@@ -998,7 +1056,8 @@ static void og_check_live(void)
         if (og_state == OG_APPLIED)
         {
             og_state = OG_ACTIVE;
-            og_log("active: capmode %x slot %d VD %d", cap, slot, vd);
+            og_log("active: capmode %x slot %d VD %d, base sync %d, Canon 24.00p setting %d",
+                   cap, slot, vd, og_rd(OG_TIMING_INFO + 4), og_24p_stored());
             NotifyBox(2000, "Open gate ON: 4096x2736 %s", og_rate->name);
         }
         return;
@@ -1031,6 +1090,9 @@ static void og_debug_step(void)
     {
         og_assert_hit = 2;
         og_log("%s", og_assert_buf);
+        /* what Canon logged before it: the camera still runs the worker here (camera log) */
+        if (!ml_shutdown_requested)
+            og_log("Canon ring to OGASSERT.BIN: %d blocks", og_dm_dump("ML/LOGS/OGASSERT.BIN"));
     }
     og_assert_ctx[0] = og_state;
     og_assert_ctx[1] = lv;
@@ -1162,7 +1224,7 @@ static void og_step(void)
                 og_active_since = 0;
                 og_bad_samples = 0;
                 og_state = OG_APPLIED;
-                og_log("applied: 4K %s", r->name);
+                og_log("applied: 4K %s, Canon 24.00p setting %d", r->name, og_24p_stored());
                 NotifyBox(OG_READY_MS, "Open gate ready (4K %s):\nswitch to movie mode.", r->name);
                 og_ready_shown = get_ms_clock() | 1;
             }
