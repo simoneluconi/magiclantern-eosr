@@ -52,7 +52,7 @@ static volatile int og_setting_col;      /* timing column 2/3/4, 0 = unknown or 
 static volatile int og_setting_bad;      /* 1 not 4K <= 30p, 2 crop, 3 fps not supported */
 static volatile int og_setting_seq;      /* og_vmode_changes when the setting was learnt */
 static volatile int og_hdmi;
-static const struct og_rate * og_rate;   /* rate of the applied set */
+static const struct og_rate * og_rate;   /* rate applied, then the live one (all columns are patched) */
 
 static struct semaphore * og_lock;      /* worker task vs. property handler removal */
 
@@ -146,7 +146,7 @@ static int og_alloc_copies(void)
  * the change list
  * ------------------------------------------------------------------------ */
 
-#define OG_MAX_RAM 96
+#define OG_MAX_RAM 128
 #define OG_MAX_ROM 64
 struct og_ramw { uint32_t addr; uint8_t size, deferred; uint32_t stock, val; };
 static struct og_ramw og_ram[OG_MAX_RAM];
@@ -353,16 +353,23 @@ static int og_prepare(const struct og_rate * r)
         else og_add_ram(c->addr, c->size, c->stock, c->val, 0);
     }
 
-    /* timing cells of the rate's column (HD and SetP/cartridge as slot 9) */
-    int col = r->col;
-    if (RD16(OG_TCELL(0xF00, col)) != OG_T_FLAG) FAIL("timing table unexpected");
-    og_add_ram(OG_TCELL(0x000, col), 2, r->fl_stock, r->fl, 0);
-    og_add_ram(OG_TCELL(0x280, col), 2, OG_T_SETP_STOCK, OG_T_SETP, 0);
-    og_add_ram(OG_TCELL(0x500, col), 2, OG_T_ROD_STOCK, OG_T_ROD, 0);
-    og_add_ram(OG_TCELL(0x780, col), 2, r->rps_stock, r->rps, 0);
-    og_add_ram(OG_TCELL(0xA00, col), 2, OG_T_HD_STOCK, OG_T_HD, 0);
-    og_add_ram(OG_TCELL(0xC80, col), 2, OG_T_HDUS_STOCK, OG_T_HDUS, 0);
-    og_add_ram(OG_TCART(col), 4, OG_T_CART_STOCK, OG_T_CART, 0);
+    /* timing cells of every supported column (HD and SetP/cartridge as slot 9), not only
+     * the current one: a PAL/NTSC or fps change inside 4K <= 30p restarts the movie LV on
+     * another column, and a stock column under the full-height readout froze the camera
+     * (run 52). The encoder rows already cover the three rates. */
+    for (int i = 0; i < COUNT(og_rates); i++)
+    {
+        const struct og_rate * t = &og_rates[i];
+        int col = t->col;
+        if (RD16(OG_TCELL(0xF00, col)) != OG_T_FLAG) FAIL("timing table unexpected");
+        og_add_ram(OG_TCELL(0x000, col), 2, t->fl_stock, t->fl, 0);
+        og_add_ram(OG_TCELL(0x280, col), 2, OG_T_SETP_STOCK, OG_T_SETP, 0);
+        og_add_ram(OG_TCELL(0x500, col), 2, OG_T_ROD_STOCK, OG_T_ROD, 0);
+        og_add_ram(OG_TCELL(0x780, col), 2, t->rps_stock, t->rps, 0);
+        og_add_ram(OG_TCELL(0xA00, col), 2, OG_T_HD_STOCK, OG_T_HD, 0);
+        og_add_ram(OG_TCELL(0xC80, col), 2, OG_T_HDUS_STOCK, OG_T_HDUS, 0);
+        og_add_ram(OG_TCART(col), 4, OG_T_CART_STOCK, OG_T_CART, 0);
+    }
 
     /* capture-mode map: 0x1B -> slot 9, three readers */
     uint8_t * map = og_copy[CP_MAP];
@@ -746,10 +753,13 @@ static void og_check_live(void)
     if (!og_active_since) { og_active_since = get_ms_clock(); return; }
     if (get_ms_clock() - og_active_since < 1500) return;
     int cap = og_capmode(), slot = og_slot(), vd = og_rd(OG_IMGCTRL + 0x10);
-    int ok = cap == OG_CAPMODE_4K30 && slot == OG_SLOT_FULL && og_rate
-          && vd >= og_rate->fl && vd <= og_rate->fl + 2;
+    const struct og_rate * live = og_rate_of_col(og_rd(OG_TIMING_INFO + 0x24));
+    int ok = cap == OG_CAPMODE_4K30 && slot == OG_SLOT_FULL && live
+          && vd >= live->fl && vd <= live->fl + 2;
     if (ok)
     {
+        if (og_rate != live) og_log("live rate: 4K %s", live->name);
+        og_rate = live;     /* the rate shown in the menu */
         if (og_bad_samples) og_log("live state back after %d bad samples", og_bad_samples);
         og_bad_samples = 0;
         if (og_state == OG_APPLIED)
@@ -760,7 +770,8 @@ static void og_check_live(void)
         }
         return;
     }
-    if (!og_bad_samples++) og_log("live state wrong: capmode %x slot %d VD %d", cap, slot, vd);
+    if (!og_bad_samples++)
+        og_log("live state wrong: capmode %x slot %d VD %d fps idx %d", cap, slot, vd, og_rd(OG_TIMING_INFO + 0x24));
     if (RECORDING) return;
     int give_up = og_state == OG_ACTIVE ? og_bad_samples >= OG_BAD_SAMPLES
                 : get_ms_clock() - og_active_since > 4000;
