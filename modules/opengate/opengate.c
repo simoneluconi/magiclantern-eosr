@@ -64,7 +64,9 @@ static volatile int og_in_handler;      /* set while a property handler runs: no
 
 static void og_log(const char * fmt, ...)
 {
-    if (!og_debug || og_in_handler) return;
+    /* no card access while Canon shuts down: the LV stop at power off logs a line, and a
+     * write racing the card shutdown is the suspect of two power-off hangs (run 53) */
+    if (!og_debug || og_in_handler || ml_shutdown_requested) return;
     char buf[200];
     va_list ap;
     va_start(ap, fmt);
@@ -676,13 +678,18 @@ static CONFIG_INT("opengate.vm1", og_saved_vm1, 0);
 static CONFIG_INT("opengate.vm2", og_saved_vm2, 0);
 static CONFIG_INT("opengate.vm.ok", og_saved_vm_ok, 0);
 
+/* written only when something changes (the config is saved at power off) */
 static void og_save_setting(int col)
 {
+    int ok = col && og_vmode_calls > 0;
+    int vm0 = ok ? (int) og_vmode[0] : 0, vm1 = ok ? (int) og_vmode[1] : 0, vm2 = ok ? (int) og_vmode[2] : 0;
+    if (og_saved_col == col && og_saved_vm_ok == ok && og_saved_vm0 == vm0 && og_saved_vm1 == vm1 && og_saved_vm2 == vm2)
+        return;
     og_saved_col = col;
-    og_saved_vm_ok = col && og_vmode_calls > 0;
-    og_saved_vm0 = og_vmode[0];
-    og_saved_vm1 = og_vmode[1];
-    og_saved_vm2 = og_vmode[2];
+    og_saved_vm_ok = ok;
+    og_saved_vm0 = vm0;
+    og_saved_vm1 = vm1;
+    og_saved_vm2 = vm2;
 }
 
 /* learn the setting from Canon's own (unpatched) movie LV. A sample counts only when the
