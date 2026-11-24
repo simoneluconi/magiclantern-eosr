@@ -1929,9 +1929,9 @@ static void TmpMem_AddFile(char* filename)
     int filesize = FIO_GetFileSize_direct(filename);
     if (filesize == -1) return;
 
-    /* don't add the same file twice */
+    /* don't add the same file twice (FAT names: ML/cropmks = ML/CROPMKS) */
     for (int i = 0; i < tmp_file_index; i++)
-        if (streq(tmp_files[i].name, filename))
+        if (strcasecmp(tmp_files[i].name, filename) == 0)
             return;
 
     if (tmp_file_index >= TMP_MAX_FILES || strlen(filename) >= sizeof(tmp_files[0].name)
@@ -1993,13 +1993,15 @@ static void CopyMLDirectoryToRAM_BeforeFormat(char* dir, int (*is_valid_filename
             continue; // is a directory
         }
         
-        if (is_valid_filename && !is_valid_filename(file.name))
+        char fn[0x80];
+        snprintf(fn, sizeof(fn), "%s%s", dir, file.name);
+
+        /* the filter gets the whole path */
+        if (is_valid_filename && !is_valid_filename(fn))
         {
             continue;
         }
 
-        char fn[0x80];
-        snprintf(fn, sizeof(fn), "%s%s", dir, file.name);
         TmpMem_AddFile(fn);
 
     } while( FIO_FindNextEx( dirent, &file ) == 0);
@@ -2022,6 +2024,20 @@ static int is_valid_log_filename(char* filename)
     return 0;
 }
 
+static int is_not_in_logs_dir(char* path)
+{
+    /* "ML/LOGS/", any case */
+    const char * logs = "ML/LOGS/";
+    for (int i = 0; logs[i]; i++)
+    {
+        char c = path[i];
+        if (c >= 'a' && c <= 'z') c -= 'a' - 'A';
+        if (c != logs[i])
+            return 1;
+    }
+    return 0;
+}
+
 static void CopyMLFilesToRAM_BeforeFormat()
 {
     /* this is the most important file, read it first */
@@ -2034,11 +2050,19 @@ static void CopyMLFilesToRAM_BeforeFormat()
 
     /* FIR files from root dir */
     CopyMLDirectoryToRAM_BeforeFormat("", is_valid_fir_filename, 0);
-    
-    /* everything else from ML dir */
-    CopyMLDirectoryToRAM_BeforeFormat("ML/", 0, 2);
-    
-    /* and, if we still have free space, also keep the LOG files from root dir */
+
+    /* help pages, cropmarks and scripts before the rest: with a small
+     * buffer (CONFIG_RESTORE_AFTER_FORMAT_MAX_SIZE), large logs or dumps
+     * in ML/LOGS could use it up first */
+    CopyMLDirectoryToRAM_BeforeFormat("ML/DOC/", 0, 0);
+    CopyMLDirectoryToRAM_BeforeFormat("ML/CROPMKS/", 0, 0);
+    CopyMLDirectoryToRAM_BeforeFormat("ML/SCRIPTS/", 0, 1);
+
+    /* everything else from ML dir, except the logs */
+    CopyMLDirectoryToRAM_BeforeFormat("ML/", is_not_in_logs_dir, 2);
+
+    /* and, if we still have free space, also keep the logs */
+    CopyMLDirectoryToRAM_BeforeFormat("ML/LOGS/", 0, 0);
     CopyMLDirectoryToRAM_BeforeFormat("", is_valid_log_filename, 0);
     
     /* restore Toshiba FlashAir files, if any */
