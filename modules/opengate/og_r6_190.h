@@ -297,6 +297,13 @@ static const struct og_word og_player_x1 =
 static const struct og_word og_player_x2 =
     { 0xE0405204, 0x47F0E92D, 0x47702001, 1, "OG player test: no ORCA resize" };   /* movs r0,#1; bx lr */
 
+/* camera bisection: decode and convert handle 4096x2752, the resize kills the camera.
+ * H1 (PLAYER-2736.md 11): the resize setup E041BE72 always takes Canon's 8K branch for the
+ * ORCA work size (w/2 x h/2 = 2048x1368), keeping the 4K resize modes. Page E0410000.
+ * Global while in: stock clips also resize from a half-size intermediate */
+static const struct og_word og_player_h1 =
+    { 0xE041BEB0, 0x2801B128, 0x2801E005, 1, "OG player: half-size resize work" }; /* cbz r0 -> b */
+
 /* Canon's hidden "24.00p" row in Movie rec. quality (fps24/FPS24.md 7, steps 1-2 of 7.5):
  * GUI only, nothing reaches the camera controller (its request handler is still the stock
  * nop.w), so nothing is stored and the sensor never changes. Words from fps24/asm24.py. */

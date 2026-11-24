@@ -581,7 +581,7 @@ static int og_reserve_extras(int player, int r24)
     if (!player && !r24) return 1;
     int p = og_pages_ok ? og_reserve_steps[COUNT(og_reserve_steps) - 1][0] : OG_BOOT_PAGES;
     int l = og_pages_ok ? OG_ALL_L2 : OG_BOOT_L2;
-    if (player) { p += OG_PLAYER_PAGES; l += OG_PLAYER_L2; }
+    if (player) { p += player == 5 ? OG_PLAYER_PAGES + 1 : OG_PLAYER_PAGES; l += OG_PLAYER_L2; }
     if (r24) { p += og_pages_ok ? 1 : 2; l += 2; }
     if (l > OG_ALL_L2) l = OG_ALL_L2;
     if (p > OG_ALL_PAGES)
@@ -660,12 +660,19 @@ static int og_player_can_change(void)
 }
 
 /* the words of a player mode: 1 = P1-P3; tests: 2 = + D1 (8K resize path), 3 = + X1 (no
- * ORCA convert), 4 = + X2 (no ORCA resize) */
+ * ORCA convert), 4 = + X2 (no ORCA resize), 5 = + H1 (half-size resize work) */
 static const struct og_word * og_player_word(int mode, int i)
 {
     if (i < COUNT(og_player_words)) return &og_player_words[i];
     if (i > COUNT(og_player_words)) return 0;
-    return mode == 2 ? &og_player_d1 : mode == 3 ? &og_player_x1 : mode == 4 ? &og_player_x2 : 0;
+    return mode == 2 ? &og_player_d1 : mode == 3 ? &og_player_x1 : mode == 4 ? &og_player_x2
+         : mode == 5 ? &og_player_h1 : 0;
+}
+
+/* pages of a player mode: E04E0000 and E0400000, + E0410000 for H1 */
+static int og_player_pages(int mode)
+{
+    return mode == 5 ? OG_PLAYER_PAGES + 1 : OG_PLAYER_PAGES;
 }
 
 static int og_player_apply(int mode)
@@ -683,7 +690,12 @@ static int og_player_apply(int mode)
         p[n] = (struct patch) { .addr = (uint8_t *) w->addr, .old_value = w->stock, .new_value = w->val,
                                 .size = 4, .is_instruction = w->insn, .description = w->what };
     }
-    if (!og_reserve_extras(1, og_r24_in)) { og_player_why = "Not enough memory for the patches"; return 0; }
+    if (!og_reserve_extras(mode, og_r24_in))
+    {
+        og_player_why = og_pages_ok && og_player_pages(mode) > OG_PLAYER_PAGES
+                      ? "No MMU page left: reboot, keep open gate OFF" : "Not enough memory for the patches";
+        return 0;
+    }
     int e = apply_patches(p, n);
     og_log("player: apply mode %d (%d words) %x", mode, n, e);
     if (e) { og_player_why = e == E_PATCH_TOO_MANY_PATCHES ? "Too many ML patches active" : "ROM patch refused"; return 0; }
@@ -1560,8 +1572,9 @@ static struct menu_entry og_menu[] =
             {
                 .name   = "Play open gate clips",
                 .priv   = &og_player,
-                .max    = 4,
-                .choices = CHOICES("OFF", "ON", "ON, 8K resize (test)", "ON, no convert (test)", "ON, no resize (test)"),
+                .max    = 5,
+                .choices = CHOICES("OFF", "ON", "ON, 8K resize (test)", "ON, no convert (test)", "ON, no resize (test)",
+                                   "ON, half-size resize (test)"),
                 .update = og_player_update,
                 .help   = "Experimental: Canon's player opens 4096x2736 clips. OFF at every boot.",
                 .help2  = "Set in LiveView. Test: the 8K resize path for the preview (diagnostic).",
