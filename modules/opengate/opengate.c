@@ -993,8 +993,9 @@ static int og_temp_c(int i)
 /* the worker only (file access) */
 static void og_env_log(const char * when)
 {
+    /* no "%%": Canon's vsnprintf eats an argument on it */
     og_log("env (%s): temp DRAM %d MIMI-L %d MIMI-R %d A %d TFT %d SH %d C, overheat %d, "
-           "heat budget %d%%, heat timer %d s, battery %d%%",
+           "heat budget %d pct, heat timer %d s, battery %d pct",
            when, og_temp_c(0), og_temp_c(1), og_temp_c(2), og_temp_c(3), og_temp_c(4), og_temp_c(5),
            og_temp_status, get_heat_budget_percent(), get_heat_remain_seconds(), og_battery);
 }
