@@ -173,7 +173,7 @@ static int f24_apply(void)
 {
     if (f24_opengate_in()) { f24_why = "Turn the open gate feature OFF first"; return 0; }
 
-    struct patch p[F24_NG];
+    struct patch p[F24_NG + 1];                 /* + P6, for the page reservation only */
     int np = 0, gs[F24_NG];
     for (int g = 0; g < F24_NG; g++)
     {
@@ -207,9 +207,11 @@ static int f24_apply(void)
     if (!f24_fill_cells()) return 0;
 
     /* runtime MMU pages for what these patches still need, plus P6's page (applied later,
-     * while 24.00p is live); pages remapped before, by us or another feature, are reused */
-    struct patch p6 = { .addr = (uint8_t *) f24_p6[0].addr, .size = 4 };
-    if (mmu_reserve_pages_for_patches(p, np) || mmu_reserve_pages_for_patches(&p6, 1))
+     * while 24.00p is live), in one call: it counts each page and section once over the whole
+     * list (two calls would count the same free pages twice). Pages remapped before, by us
+     * or another feature, are reused */
+    p[np] = (struct patch) { .addr = (uint8_t *) f24_p6[0].addr, .size = 4 * COUNT(f24_p6) };
+    if (mmu_reserve_pages_for_patches(p, np + 1))
     {
         f24_why = "Not enough memory for the patches";
         return 0;
