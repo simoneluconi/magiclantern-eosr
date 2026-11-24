@@ -166,6 +166,18 @@ static int og_path(void)     { return og_rd(OG_Y2V + 0x64); }
 static int og_slot(void)     { return og_rd(OG_IMGCTRL + 8); }
 static int og_capmode(void)  { return og_rd(OG_FRAMEDATA + 0x24); }
 
+/* LiveView conductor (MC-ENTRY.md 6): *(0x11404) + 0x38 is 1 from CondStop (before
+ * SDRV_ShutdownDevice) to LibCond Start (just before SDRV_StartupDevice): the sensor is off.
+ * ML's lv flag does not follow this stop (menus, setting changes) */
+#define OG_LVCOND_PTR   0x11404
+#define OG_LVCOND_SUSP  0x38
+
+static int og_lv_suspended(void)
+{
+    uint32_t o = og_rd(OG_LVCOND_PTR);
+    return og_ram_ok(o + OG_LVCOND_SUSP, 4) && RD32(o + OG_LVCOND_SUSP) == 1;
+}
+
 /* Canon's stored 24.00p setting (fps24 module, FPS24.md P4n): model+0x610, -1 unreadable */
 #define OG_CC_PTR     0x10C28
 #define OG_MODEL_OFF  0x34FC
@@ -677,12 +689,15 @@ static int og_commit(void)
  * slots) stay until the next one: they are harmless alone */
 static int og_pending_deferred;
 
+static int og_last_left;        /* words left by the last removal (logged by the worker) */
+
 static void og_remove(void)
 {
     int safe = og_safe_point();
     og_remove_rom();
     int left = og_restore_ram(safe);
     og_pending_deferred = left > 0;
+    og_last_left = left;
     og_log("remove: %s, %d words left", safe ? "safe point" : "LV running", left);
 }
 
@@ -695,8 +710,9 @@ static void og_finish_deferred(void)
 }
 
 /* ------------------------------------------------------------------------
- * property handlers: only set flags; removal on a setting change is synchronous,
- * so it finishes before Canon starts the new movie mode (DESIGN.md 3.3)
+ * property handlers: only set flags; a removal on a setting change finishes before Canon
+ * starts the new movie mode (DESIGN.md 3.3): at once outside the movie LV, with the sensor
+ * off (LV conductor suspended) while the movie LV runs with the patches
  * ------------------------------------------------------------------------ */
 
 static int og_removal_needed(void)
@@ -713,10 +729,33 @@ static volatile int og_lost_keep;       /* the setting is still known (only the 
 static const char * volatile og_lost_why = "";
 static volatile int og_removed_notice;  /* removal to show to the user (worker) */
 
+/* no restore under the running full-height 4K LV: Canon posts a setting change while the
+ * old LV still runs and restarts it later (run 57). Restoring under the running LV froze the
+ * camera once (Canon Log off while ACTIVE, 2026-11-24, no assert) after passing twice. While
+ * the movie LV runs with the patches, a removal waits until the sensor is off (LV conductor
+ * suspended, or Canon's LV_ACTION stop), at most OG_HOLD_MAX_MS */
+#define OG_HOLD_MAX_MS 5000
+static volatile int og_lost_since;      /* when the pending removal was first noted */
+static volatile int og_lv_stopping;     /* the LV_ACTION handler is removing at Canon's LV stop */
+static const char * volatile og_removed_how = "";
+static volatile int og_removed_after;   /* ms from the note to the removal */
+
+static int og_movie_lv_running(void)
+{
+    return lv && og_path() == OG_PATH_MOVIE && !og_lv_suspended();
+}
+
 /* the caller holds og_lock */
 static void og_handle_lost_locked(void)
 {
     if (!og_lost_pending || RECORDING) return;
+    int waited = get_ms_clock() - og_lost_since;
+    if (og_removal_needed() && !og_lv_stopping && og_movie_lv_running() && waited < OG_HOLD_MAX_MS)
+        return;                                 /* held until the sensor is off */
+    og_removed_how = og_lv_stopping ? "at PROP_LV_ACTION stop"
+                   : og_movie_lv_running() ? "LV stop not seen, removed under the LV"
+                   : og_lv_suspended() ? "LV suspended (sensor off)" : "LV not running";
+    og_removed_after = waited;
     og_lost_pending = 0;
     if (!og_lost_keep) og_setting_col = 0;
     og_lost_keep = 0;
@@ -733,6 +772,7 @@ static void og_handle_lost_locked(void)
 static void og_lost_note(const char * why, int keep)
 {
     if (!keep) og_setting_col = 0;
+    if (!og_lost_pending) og_lost_since = get_ms_clock();
     og_lost_keep = keep && !og_lost_pending;
     og_lost_why = why;
     og_lost_pending = 1;
@@ -893,6 +933,23 @@ PROP_HANDLER(PROP_HDMI_CHANGE)
     og_event(PROP_HDMI_CHANGE, buf[0], 0, 0, 0, 0, 0);
     og_hdmi = buf[0];
     if (og_hdmi) og_setting_lost("HDMI connected");
+    og_in_handler = 0;
+}
+
+/* Canon's LV start (0) / stop (1), posted by the GUI (menus): a moment for a held removal,
+ * the old movie LV is going away and the new one is not set up yet */
+PROP_HANDLER(PROP_LV_ACTION)
+{
+    og_in_handler = 1;
+    og_event(PROP_LV_ACTION, buf[0], og_lost_pending, og_lv_suspended(), 0, 0, 0);
+    if (buf[0] == 1 && og_removal_needed() && og_lost_pending && !RECORDING
+        && take_semaphore(og_lock, 1000) == 0)
+    {
+        og_lv_stopping = 1;
+        og_handle_lost_locked();
+        og_lv_stopping = 0;
+        give_semaphore(og_lock);
+    }
     og_in_handler = 0;
 }
 
@@ -1180,7 +1237,8 @@ static void og_step(void)
     if (og_removed_notice)
     {
         og_removed_notice = 0;
-        og_log("removed by a setting change: %s", og_reason);
+        og_log("removed by a setting change: %s (%s, %d ms after the change, %d words left)",
+               og_reason, og_removed_how, og_removed_after, og_last_left);
         NotifyBox(4000, "Open gate turned off:\n%s", og_reason);
     }
     og_observe_setting();
@@ -1253,7 +1311,14 @@ static void og_task(void * unused)
 {
     TASK_LOOP
     {
-        msleep(100);
+        if (og_lost_pending && og_removal_needed() && !RECORDING)
+        {
+            /* a removal held for the sensor stop: poll the LV conductor closely, the window
+             * from CondStop to the next LibCond Start can be short */
+            int t0 = get_ms_clock();
+            while (og_lost_pending && og_movie_lv_running() && get_ms_clock() - t0 < 100) msleep(5);
+        }
+        else msleep(100);
         if (take_semaphore(og_lock, 500) != 0) continue;
         og_step();
         give_semaphore(og_lock);
@@ -1378,4 +1443,5 @@ MODULE_PROPHANDLERS_START()
     MODULE_PROPHANDLER(PROP_MOVIE_CONTROL_PARAM)
     MODULE_PROPHANDLER(PROP_MOVIE_CROP_MODE)
     MODULE_PROPHANDLER(PROP_HDMI_CHANGE)
+    MODULE_PROPHANDLER(PROP_LV_ACTION)
 MODULE_PROPHANDLERS_END()
