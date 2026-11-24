@@ -729,12 +729,9 @@ static volatile int og_lost_keep;       /* the setting is still known (only the 
 static const char * volatile og_lost_why = "";
 static volatile int og_removed_notice;  /* removal to show to the user (worker) */
 
-/* no restore under the running full-height 4K LV: Canon posts a setting change while the
- * old LV still runs and restarts it later (run 57). Restoring under the running LV froze the
- * camera once (Canon Log off while ACTIVE, 2026-11-24, no assert) after passing twice. While
- * the movie LV runs with the patches, a removal waits until the sensor is off (LV conductor
- * suspended, or Canon's LV_ACTION stop), at most OG_HOLD_MAX_MS */
-#define OG_HOLD_MAX_MS 5000
+/* how and when each removal happened, for the log. The removal itself is never held: the
+ * hold of 34496ac10 (wait for the sensor stop) froze the camera on a Q-menu 25p -> 50p
+ * change, which switches the capture mode over the running LV right after the posting */
 static volatile int og_lost_since;      /* when the pending removal was first noted */
 static volatile int og_lv_stopping;     /* the LV_ACTION handler is removing at Canon's LV stop */
 static const char * volatile og_removed_how = "";
@@ -750,8 +747,10 @@ static void og_handle_lost_locked(void)
 {
     if (!og_lost_pending || RECORDING) return;
     int waited = get_ms_clock() - og_lost_since;
-    if (og_removal_needed() && !og_lv_stopping && og_movie_lv_running() && waited < OG_HOLD_MAX_MS)
-        return;                                 /* held until the sensor is off */
+    /* no hold: a Q-menu change (4K 25p -> 50p) switches the capture mode over the running LV
+     * 30 ms after the posting, without a stop; held, the patches were still in and the camera
+     * froze (clean-qmenu). At once, in the handler, as before 34496ac10 (run 57: removed before
+     * Canon's restart, twice) */
     og_removed_how = og_lv_stopping ? "at PROP_LV_ACTION stop"
                    : og_movie_lv_running() ? "LV stop not seen, removed under the LV"
                    : og_lv_suspended() ? "LV suspended (sensor off)" : "LV not running";
@@ -1377,14 +1376,7 @@ static void og_task(void * unused)
 {
     TASK_LOOP
     {
-        if (og_lost_pending && og_removal_needed() && !RECORDING)
-        {
-            /* a removal held for the sensor stop: poll the LV conductor closely, the window
-             * from CondStop to the next LibCond Start can be short */
-            int t0 = get_ms_clock();
-            while (og_lost_pending && og_movie_lv_running() && get_ms_clock() - t0 < 100) msleep(5);
-        }
-        else msleep(100);
+        msleep(100);
         if (take_semaphore(og_lock, 500) != 0) continue;
         og_step();
         give_semaphore(og_lock);
