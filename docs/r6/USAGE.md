@@ -24,7 +24,8 @@ Only features the R6 does not have already are enabled. Every new option starts 
 
 ### Movie > MOV/MP4 time limit
 
-- Choices: shorter limits, **29:59 (Canon)**, **45 min** and **59:59**. High Frame Rate (100/120p) stays at Canon's 7:29.
+- Choices: shorter limits, **29:59 (Canon)**, **45 min** and **59:59**.
+- High Frame Rate (100/120p): with a limit above 29:59 it records up to 29:59; with 29:59 (Canon) or less it keeps Canon's 7:29. A 10-minute 100p clip was recorded and played on a PC; playback on the camera past 7:29 is not tested yet.
 - Above 29:59 ML also patches Canon's movie writer (its per-clip tables and the 8 MB index buffer). Without that the camera would stop with Err 70 after the limit, or leave an unplayable file.
 - It also lets Canon's player open clips over 30 minutes; without that the camera says "Cannot playback movie".
 - Tested: a 60-minute FHD 50p clip on exFAT stopped at 59:59, played fine on a PC and plays back on the camera.
@@ -37,6 +38,16 @@ Only features the R6 does not have already are enabled. Every new option starts 
 - **Canon / 2x / 3x / 4x.** Slows down Canon's time-based heat budget, the timer behind the 30 / 40 minute 4K limits. On camera 2x halved the drain rate (4K 25p).
 - The real temperature sensors are not touched: the camera still warns, stops and shuts down on temperature. See [OVERHEAT.md](OVERHEAT.md).
 - Can't be changed while recording.
+
+### Movie > Open gate 4K and 24.00p
+
+- From the modules **opengate** (4096x2736, the whole sensor height) and **fps24** (true 24.00p in 4K UHD). Load them in the **Modules** tab, then turn the entry on in the Movie menu. One at a time.
+- How to set the camera for each one is on its info screen: select the module in the **Modules** tab and press **Q**.
+
+### Overlay > Cropmarks
+
+- Framing lines over the LiveView, from the bitmaps in `ML/CROPMKS` on the card. Press **Q** on the entry to choose one; you can add your own BMPs.
+- They need Global Draw. In movie mode they are drawn over the 16:9 image.
 
 ### Temperatures and the LiveView top bar
 
@@ -101,7 +112,14 @@ On builds with PTP enabled, you can also update over USB (see [USB-PTP.md](USB-P
 
 ## Formatting an ML card in the camera
 
-A camera format deletes ML **and** the card flags: Canon writes a fresh boot sector (seen on the R6). The camera then boots normally from that card, without ML. To get ML back, set the card up again on a PC ([INSTALL.md](INSTALL.md#step-2-prepare-the-ml-card)).
+Format the ML card from Canon's menu as usual. The format screen says **Format card, keep ML [INFO]**: ML copies its files to memory, Canon formats the card, then ML writes its files and the card flags back and restarts the camera. Your `ML/SETTINGS` are kept.
+
+- Press **INFO** on the format screen to switch to **Format card, remove ML**.
+- Wait for the format screen to answer the buttons: they are held back for a moment while ML copies its files.
+- ML keeps up to 2 MB of files: fonts, modules and settings first, then the rest of `ML/`. The format screen shows the size, and how many files were not kept.
+- Formatting the other card leaves ML alone.
+
+If the format screen says **ML not kept (no memory)**, ML is removed with the format; set the card up again on a PC ([INSTALL.md](INSTALL.md#step-2-prepare-the-ml-card)).
 
 ## Two cards
 

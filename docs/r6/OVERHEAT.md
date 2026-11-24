@@ -55,7 +55,7 @@ Behind it the MP4 writer has its own limits: fixed tables of 108000 entries per 
 
 ## What the ML options change
 
-- **Movie > MOV/MP4 time limit** changes the 29:59 constant, and above 29:59 also doubles the writer's tables (and the AAC table) and its index buffer (8 MB). The maximum is 59:59; HFR stays at 7:29. It also raises the player's 30-minute frame-count check, so the clips play back on the camera. A 60-minute clip was recorded, checked on a PC and played on the camera.
+- **Movie > MOV/MP4 time limit** changes the 29:59 constant, and above 29:59 also doubles the writer's tables (and the AAC table) and its index buffer (8 MB). The maximum is 59:59. Above 29:59, HFR also goes up to 29:59 (Canon's 7:29 there is the player's 30-minute frame check on the slow-motion clip); with 29:59 or less, HFR keeps 7:29. It also raises the player's 30-minute frame-count check, so the clips play back on the camera. A 60-minute clip was recorded, checked on a PC and played on the camera.
 - **Movie > Heat timer** multiplies the seconds of every row of the heat table (B) by 2, 3 or 4, so the budget drains more slowly. The stop flags, the temperature correction and the sensors (A) are unchanged. On camera, 2x halved the drain in 4K 25p.
 - Both work by replacing a few words of the firmware **in RAM** while ML runs (the MMU remaps those ROM pages). Nothing is written to the camera's firmware. With "Canon" selected, or without ML, the camera behaves as stock.
 

@@ -4,7 +4,7 @@ Movie
 MOV/MP4 time limit
 ``````````````````
 
-Longest clip, up to **59:59**; high frame rate up to 7:29. Heat can still stop a clip earlier. Trim long clips on a computer.
+Longest clip, up to **59:59**. Above 29:59, high frame rate goes up to 29:59. Heat can still stop a clip earlier. Trim long clips on a computer.
 
 Heat timer
 ``````````

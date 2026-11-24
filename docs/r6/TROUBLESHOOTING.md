@@ -53,7 +53,9 @@ Remove the battery and put the card in a PC. On the R6 the memory ML may reserve
 
 ## Files missing or the card shows errors on the PC
 
-This usually means unflushed writes on Windows. Always use "Safely remove". If needed, back up the photos, format the card in the camera, and set it up again ([INSTALL.md](INSTALL.md#step-2-prepare-the-ml-card)).
+On Windows this usually means unflushed writes: always use "Safely remove".
+
+A crash followed by a battery pull can also damage the file system: on the R6 two files ended up sharing the same clusters (a log file held movie data). In testing, a run of Err 70s happened on such a card and stopped after it was formatted. After such a crash, check the card on a PC (`chkdsk E:` without `/f` only reports). If it shows errors, copy your files off and format the card in the camera: **Format card, keep ML** puts ML back ([USAGE.md](USAGE.md#formatting-an-ml-card-in-the-camera)).
 
 ## Going back to stock
 
