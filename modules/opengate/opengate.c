@@ -777,7 +777,9 @@ static void og_check_live(void)
         }
         return;
     }
-    if (!og_bad_samples++)
+    /* logged from the 3rd sample: the LV teardown at power off shows one or two samples of
+     * capture mode 0, and nothing should be written to the card then */
+    if (++og_bad_samples == 3)
         og_log("live state wrong: capmode %x slot %d VD %d fps idx %d", cap, slot, vd, og_rd(OG_TIMING_INFO + 0x24));
     if (RECORDING) return;
     int give_up = og_state == OG_ACTIVE ? og_bad_samples >= OG_BAD_SAMPLES
