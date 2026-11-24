@@ -402,9 +402,20 @@ extern int winsys_bmp_dirty_bit_neg;
 // Longest limit, given MVR_WRITER_PATCHES: 216000 frames last 60:03 at
 // 59.94p.
 #define MVR_TIME_LIMIT_MAX_SEC    (60 * 60)
-// High Frame Rate (119.88p) fills the tables twice as fast, so never
-// lengthen it past Canon's 7:29; shorter limits still apply.
-#define MVR_TIME_LIMIT_MAX_HFR_SEC (7 * 60 + 29)
+// High Frame Rate (119.88p / 100p, no audio) is stored as a slow-motion clip
+// at 29.97p / 23.976p / 25p (not checked on a file: Canon's player plays these
+// clips, and ChkTotalFrame refuses any other fps code), so Canon's 7:29 is the
+// player's 30 min check
+// (ChkTotalFrame, MVR_PLAYBACK_PATCHES), not a writer limit: 7:29 at 119.88p
+// is 53,826 frames, 29.97p allows 53,946. With the long-clip patches
+// (limits above Canon's 29:59), 29:59 fits:
+// - writer: 29:59 at 119.88p = 215,664 frames of the 216,000 (ctts too);
+// - moov: 18.55 B per frame measured on a 50p clip, so about 4 MB of the 8;
+// - player: 262,144 frames at 29.97p / 23.976p (36 min at 119.88p), 180,000
+//   at 25p (30:00 at 100p).
+// Up to Canon's 29:59 nothing is patched and high frame rate keeps 7:29.
+#define MVR_TIME_LIMIT_HFR_CANON_SEC (7 * 60 + 29)
+#define MVR_TIME_LIMIT_MAX_HFR_SEC (29 * 60 + 59)
 
 // XCM_New 0xE0174FA4 allocates the XCM on the heap, so there is no fixed address.
 // XCM_GetContext 0xE0175274 returns xcm + idx*0x7A0 + 0x10; context 0 = XCM + 0x10 (as on R5).

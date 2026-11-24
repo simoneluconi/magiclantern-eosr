@@ -923,6 +923,12 @@ static MENU_UPDATE_FUNC(print_mov_time_limit)
         #else
         MENU_SET_WARNING(MENU_WARN_ADVICE, "Too long recording makes empty files on ExFAT, ok on FAT32");
         #endif
+        #ifdef MVR_TIME_LIMIT_HFR_CANON_SEC
+        /* above Canon's limit, high frame rate gets its own, shorter maximum */
+        if (mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit > 30 * 60)
+            MENU_SET_WARNING(MENU_WARN_INFO, "High frame rate: up to %d:%02d.",
+                             MVR_TIME_LIMIT_MAX_HFR_SEC / 60, MVR_TIME_LIMIT_MAX_HFR_SEC % 60);
+        #endif
     }
 }
 
@@ -998,11 +1004,19 @@ static void change_mov_time_limit(void* priv, int delta)
     // One second less, as Canon's own 29:59: 60 min -> 59:59.
     if (mov_time_limit != MOV_TIME_LIMIT_OFF && mov_time_limit % (60 * 60) == 0)
         limit_ms -= 1000;
+    // only above Canon's limit: shorter limits leave writer and player as they are
+    int long_clips = mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit > 30 * 60;
     uint32_t hfr_limit_ms = limit_ms;
 #ifdef MVR_TIME_LIMIT_MAX_HFR_SEC
-    // high frame rate has more frames per second: its own maximum (consts.h)
-    if (mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit > MVR_TIME_LIMIT_MAX_HFR_SEC)
-        hfr_limit_ms = MVR_TIME_LIMIT_MAX_HFR_SEC * 1000;
+    // high frame rate has more frames per second: its own maximum with the
+    // long-clip patches, else Canon's (consts.h)
+    #ifdef MVR_TIME_LIMIT_HFR_CANON_SEC
+    int hfr_max_sec = long_clips ? MVR_TIME_LIMIT_MAX_HFR_SEC : MVR_TIME_LIMIT_HFR_CANON_SEC;
+    #else
+    int hfr_max_sec = MVR_TIME_LIMIT_MAX_HFR_SEC;
+    #endif
+    if (mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit > hfr_max_sec)
+        hfr_limit_ms = hfr_max_sec * 1000;
 #endif
     // Above Canon's limit, the movie writer's own limits (MVR_WRITER_PATCHES)
     // and those of Canon's player for longer clips (MVR_PLAYBACK_PATCHES)
@@ -1058,8 +1072,6 @@ static void change_mov_time_limit(void* priv, int delta)
         }
     };
     int n_patches = 2;
-    // only above Canon's limit: shorter limits leave writer and player as they are
-    int long_clips = mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit > 30 * 60;
     for (int i = 0; i < n_long_clip; i++)
     {
         patches[2 + i] = (struct patch) {
