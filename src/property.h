@@ -504,6 +504,18 @@
 // buf[3]: GoP
 #endif
 
+// R6 (DIGIC X, CONFIG_PROP_MOVIE_CONTROL_PARAM): PROP_VIDEO_MODE is not posted
+// there. The movie setting is the CameraConductor's MovieControlParam, posted
+// when the size, frame rate or readout changes (0x34 bytes):
+// buf[0]: fps x 100, rounded (2400 for 23.98p, 3000 for 29.97p)
+// buf[1]: fps x 100, exact (2398, 2400, 2500, 2997, 5000, 5994, 10000, 11988)
+// byte 8: movie size (0 FHD, 5 UHD / 4K, as the encoder's MovieSize)
+// byte 0x2C: sensor readout (4 with movie crop, else 5)
+// byte 0x30: 2 for 24.00p
+#define PROP_MOVIE_CONTROL_PARAM 0x800000CC
+#define PROP_MOVIE_CONTROL_PARAM_LEN 0x34
+#define PROP_MOVIE_CROP_MODE     0x80020054 // buf[0]: movie crop (non-zero = on)
+
 #define PROP_DOF_PREVIEW_MAYBE 0x8005000B
 
 #define PROP_REMOTE_SW1 0x80020015

@@ -234,6 +234,30 @@ PROP_HANDLER(PROP_VIDEO_MODE)
     #endif
 }
 
+#ifdef CONFIG_PROP_MOVIE_CONTROL_PARAM
+/* the movie setting where PROP_VIDEO_MODE is not posted (property.h).
+ * Canon's codes are kept apart: video_mode_resolution has ML's meaning
+ * (0 = 16:9, > 1 = 4:3; overlays, cropmarks and screen layouts use it), and
+ * every movie size of these cams (FHD, UHD / 4K) is 16:9, so it stays 0.
+ * Canon's movie crop is not ML's video_mode_crop either (that one selects
+ * FPS timer tables, raw and digital zoom paths of older cams). */
+volatile int video_mode_size_code = -1;     /* Canon's movie size: 0 FHD, 5 UHD / 4K */
+volatile int video_mode_movie_crop = 0;     /* Canon's movie crop on */
+
+PROP_HANDLER(PROP_MOVIE_CONTROL_PARAM)
+{
+    if (len < PROP_MOVIE_CONTROL_PARAM_LEN) return;
+    video_mode_size_code = ((const uint8_t *) buf)[8];
+    video_mode_resolution = 0;
+    video_mode_fps = (buf[1] + 50) / 100;   /* as for PROP_VIDEO_MODE: 29.97 -> 30 */
+}
+
+PROP_HANDLER(PROP_MOVIE_CROP_MODE)
+{
+    video_mode_movie_crop = buf[0] != 0;
+}
+#endif
+
 #ifdef CONFIG_LIVEVIEW
 PROP_HANDLER( PROP_LV_ACTION )
 {

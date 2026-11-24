@@ -170,6 +170,12 @@
 #define CONFIG_MMU_RUNTIME_L2_TABLES 12
 #define CONFIG_MAX_PATCHES 48
 
+/** PROP_VIDEO_MODE (0x80000039) is never posted on R6 (0 calls in a camera
+ * test): the frame rate comes from PROP_MOVIE_CONTROL_PARAM, Canon's movie
+ * size code and movie crop from it and PROP_MOVIE_CROP_MODE
+ * (src/property.h, src/propvalues.c). */
+#define CONFIG_PROP_MOVIE_CONTROL_PARAM
+
 #define CONFIG_TASK_STRUCT_V2_SMP
 #define CONFIG_TASK_ATTR_STRUCT_V5
 
