@@ -802,6 +802,13 @@ static void og_event(uint32_t prop, uint32_t a, uint32_t b, uint32_t c, uint32_t
  * (camera log): such a change removes the patches, and the next safe point re-applies */
 static uint8_t og_mcp_raw[PROP_MOVIE_CONTROL_PARAM_LEN];
 static int og_mcp_raw_ok;
+static volatile int og_crop_posts;      /* PROP_MOVIE_CROP_MODE postings */
+static volatile int og_other_since;     /* time of an "other" change still to decide, 0 none */
+static volatile int og_other_crop_posts;
+/* camera logs: the crop posting follows within 20-50 ms; the Err 70 of a change kept under
+ * the patches came seconds later, at record start. A switch whose crop posting does not
+ * come in time only costs a removal (the safe side) */
+#define OG_OTHER_WAIT_MS 500
 #define OG_MCP_FPS_LO  0x000000FFu      /* bytes 0-7: w0, w1 */
 #define OG_MCP_FPS_HI  (1u << (0x30 - 32))
 
@@ -831,8 +838,14 @@ PROP_HANDLER(PROP_MOVIE_CONTROL_PARAM)
              * the live check follows the live one */
             if (!og_mcp_col(&m, &why)) og_setting_lost(why);
         }
+        /* decided by the worker: a photo / movie switch posts this and then, about 20 ms
+         * later, PROP_MOVIE_CROP_MODE, and the photo LV posting carries other values than
+         * the movie one (Canon Log is movie only); a menu change posts this alone */
         if (other && !why && og_removal_needed())
-            og_lost("Movie recording settings changed", 1);
+        {
+            og_other_crop_posts = og_crop_posts;
+            og_other_since = get_ms_clock() | 1;
+        }
     }
     og_in_handler = 0;
 }
@@ -841,6 +854,7 @@ PROP_HANDLER(PROP_MOVIE_CROP_MODE)
 {
     og_in_handler = 1;
     og_event(PROP_MOVIE_CROP_MODE, buf[0], 0, 0, 0, 0, 0);
+    og_crop_posts++;
     int c = buf[0] != 0;
     if (c != og_crop) og_setting_changes++;
     og_crop = c;
@@ -1061,9 +1075,30 @@ static void og_debug_step(void)
     }
 }
 
+/* an "other" change of the recording setup (PROP_MOVIE_CONTROL_PARAM handler): a menu
+ * change if no PROP_MOVIE_CROP_MODE posting followed within OG_OTHER_WAIT_MS */
+static void og_decide_other(void)
+{
+    int since = og_other_since;
+    if (!since) return;
+    if (og_crop_posts != og_other_crop_posts)
+    {
+        og_other_since = 0;
+        og_log("recording setup differs with a photo / movie switch: kept");
+        return;
+    }
+    if (get_ms_clock() - since < OG_OTHER_WAIT_MS) return;
+    og_other_since = 0;
+    if (!og_removal_needed()) return;
+    og_lost_keep = !og_lost_pending;
+    og_lost_why = "Movie recording settings changed";
+    og_lost_pending = 1;        /* removed below by og_handle_lost_locked */
+}
+
 static void og_step(void)
 {
     og_debug_step();
+    og_decide_other();
     if (og_ready_shown)
     {
         if (get_ms_clock() - og_ready_shown >= OG_READY_MS) og_ready_shown = 0;
