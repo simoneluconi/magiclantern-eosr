@@ -911,6 +911,15 @@ PROP_HANDLER(PROP_MOVIE_CONTROL_PARAM)
          * stays known until the posting is decided (the photo LV one is not the setting) */
         const char * why;
         if (!og_mcp_col(&m, &why) && og_removal_needed()) og_lost(why, 1);
+        /* a recording setup change (same rate, other bytes) posted while the movie LV is
+         * already stopped (Canon's MENU opened from the movie LV or during REC): the patches
+         * go now, with the sensor off. Decided 500 ms later the LV has restarted with the new
+         * codec and the removal would be held, then made under the running LV: that froze the
+         * camera (clean-run1, 2026-11-24). A photo / movie switch posts while its LV still
+         * runs, so it never takes this path */
+        else if (og_removal_needed() && !og_movie_lv_running() && og_pend_path == OG_PATH_MOVIE
+                 && og_mcp_raw_ok && m.fps100 == og_mcp.fps100 && og_mcp_other(b, 0, 0))
+            og_lost("Movie recording settings changed", 1);
     }
     og_in_handler = 0;
 }
