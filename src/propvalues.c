@@ -220,6 +220,10 @@ PROP_HANDLER(PROP_VIDEO_MODE)
     #ifdef CONFIG_500D
     video_mode_resolution = buf[0];
     video_mode_fps = buf[1];
+    #elif defined(CONFIG_PROP_MOVIE_CONTROL_PARAM)
+    /* posted only once, at boot, with a stale value (camera log: video_mode_fps
+     * read 30 at 25p right after boot); PROP_MOVIE_CONTROL_PARAM has the setting */
+    return;
     #elif defined(CONFIG_DIGIC_678X)
     video_mode_crop = buf[0];
     video_mode_resolution = buf[1];
@@ -235,7 +239,8 @@ PROP_HANDLER(PROP_VIDEO_MODE)
 }
 
 #ifdef CONFIG_PROP_MOVIE_CONTROL_PARAM
-/* the movie setting where PROP_VIDEO_MODE is not posted (property.h).
+/* the movie setting where PROP_VIDEO_MODE is only posted once, stale, at
+ * boot (property.h).
  * Canon's codes are kept apart: video_mode_resolution has ML's meaning
  * (0 = 16:9, > 1 = 4:3; overlays, cropmarks and screen layouts use it), and
  * every movie size of these cams (FHD, UHD / 4K) is 16:9, so it stays 0.

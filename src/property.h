@@ -504,9 +504,10 @@
 // buf[3]: GoP
 #endif
 
-// R6 (DIGIC X, CONFIG_PROP_MOVIE_CONTROL_PARAM): PROP_VIDEO_MODE is not posted
-// there. The movie setting is the CameraConductor's MovieControlParam, posted
-// when the size, frame rate or readout changes (0x34 bytes):
+// R6 (DIGIC X, CONFIG_PROP_MOVIE_CONTROL_PARAM): PROP_VIDEO_MODE is posted only
+// once at boot, stale. The movie setting is the CameraConductor's
+// MovieControlParam, posted at boot (before modules are loaded) and when the
+// size, frame rate or readout changes, before the LV restarts (0x34 bytes):
 // buf[0]: fps x 100, rounded (2400 for 23.98p, 3000 for 29.97p)
 // buf[1]: fps x 100, exact (2398, 2400, 2500, 2997, 5000, 5994, 10000, 11988)
 // byte 8: movie size (0 FHD, 5 UHD / 4K, as the encoder's MovieSize)
