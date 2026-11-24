@@ -43,10 +43,11 @@ void change_mmu_tables_wrapper(void);
 int apply_patch(struct patch *patch);
 int apply_normal_patches(void);
 
-// Grows the pool of remappable pages to at least these totals, for cams with
-// CONFIG_MMU_RUNTIME_PAGES_MAX (src/patch_mmu.c). Idempotent; task context
-// only; all or nothing; never freed.
-int mmu_reserve_runtime_pages(uint32_t total_pages, uint32_t total_L2_tables);
+// Grows the pool of remappable pages by what these patches still need (ROM
+// pages not remapped yet, sections without an L2 table yet), for cams with
+// CONFIG_MMU_RUNTIME_PAGES_MAX (src/patch_mmu.c). Call before apply_patches();
+// task context only; all or nothing; never freed.
+int mmu_reserve_pages_for_patches(const struct patch *patches, uint32_t count);
 
 // Sets up structures required for remapping via MMU,
 // and applies compile-time specified patches from platform/XXD/include/platform/mmu_patches.h

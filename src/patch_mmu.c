@@ -48,7 +48,8 @@
 
 // CONFIG_MMU_RUNTIME_PAGES_MAX: room for this many runtime pages in all.
 // CONFIG_MMU_RUNTIME_PAGES of them are taken at boot; a feature that needs
-// more only while it is enabled takes them with mmu_add_runtime_pages().
+// more only while it is enabled takes them with
+// mmu_reserve_pages_for_patches().
 // Defaults to CONFIG_MMU_RUNTIME_PAGES (nothing on demand).
 #ifdef CONFIG_MMU_RUNTIME_PAGES_MAX
 #define MMU_RUNTIME_PAGES_MAX CONFIG_MMU_RUNTIME_PAGES_MAX
@@ -99,15 +100,16 @@ extern int send_software_interrupt(uint32_t interrupt, uint32_t shifted_cpu_id);
 extern void *memcpy_dryos(void *dst, const void *src, uint32_t count);
 //extern void early_printf(char *fmt, ...);
 
+// This index is how far into our set of available 64k RAM pages
+// we are (boot pages first, then runtime pages).  When exhausted,
+// we have no more RAM to back ROM edits.
+static uint32_t backing_page_index = 0;
+
 static int assign_64k_to_L2_table(struct patch *patch,
                                   struct mmu_L2_page_info *L2_page)
 {
     // SJE TODO can / should we use a semaphore here?  I'm not sure we can
     // given the fairly early context we want to call this.
-
-    // This index is how far into our set of available 64k RAM pages
-    // we are.  When exhausted, we have no more RAM to back ROM edits.
-    static uint32_t backing_page_index = 0;
 
     // An L2 section is split into 64kB "large pages", of which there can be 16
     // in use.  Determine which of these wants to be used.
@@ -627,12 +629,6 @@ static uint32_t free_runtime_L2_tables(void)
     return n;
 }
 
-static uint32_t runtime_L2_tables(void)
-{
-    return global_mmu_conf.max_L2_tables - global_mmu_conf.max_64k_pages_remapped
-           - free_runtime_L2_tables();
-}
-
 // Adds n_pages 64kB pages and n_L2_tables L2 tables (one per 1 MB section
 // that holds remapped pages) for ROM patches, from Canon's AllocateMemory pool,
 // in one block: up to 64kB of it is lost to the page alignment.
@@ -689,23 +685,77 @@ static int mmu_add_runtime_pages(uint32_t n_pages, uint32_t n_L2_tables)
     return 0;
 }
 
-// Makes sure the runtime pool holds at least total_pages runtime pages and
-// total_L2_tables runtime L2 tables (the INIT_FUNC's count, boot space not);
-// adds only what is missing, in one AllocateMemory block. Calling it
-// again with the same totals adds nothing, so a feature can call it each time
-// it is enabled. The memory is never freed: remapped pages are never unmapped
-// (unpatching only restores the ROM bytes in the RAM copy). Features that are
-// on at the same time share the pool, so ask for the pages they need together.
-// Task context only (see mmu_add_runtime_pages). Returns 0, or a negative
-// value if nothing was added.
-int mmu_reserve_runtime_pages(uint32_t total_pages, uint32_t total_L2_tables)
+// The L2 table that remaps the 1 MB section holding addr, or NULL.
+static struct mmu_L2_page_info *L2_for_section(uint32_t addr)
+{
+    for (uint32_t i = 0; i < global_mmu_conf.max_L2_tables; i++)
+    {
+        struct mmu_L2_page_info *t = &global_mmu_conf.L2_tables[i];
+        if (t->in_use && t->virt_page_mapped == (addr & 0xfff00000))
+            return t;
+    }
+    return NULL;
+}
+
+// Makes sure the pool can remap what patches[0..count) touch: the 64kB ROM
+// pages not remapped yet, and the 1 MB sections without an L2 table yet.
+// Pages remapped earlier, by these patches or by any others, are reused
+// (unpatching keeps them mapped, with the ROM bytes back in the RAM copy),
+// and free boot or runtime pages and tables count, so a feature asks for its
+// own patches only, whatever else was enabled before in this boot. Adds only
+// what is missing, in one AllocateMemory block (mmu_add_runtime_pages); the
+// memory is never freed. Calling it again for patches already applied once
+// adds nothing, so a feature can call it each time it is enabled, before
+// apply_patches(). Task context only. Returns 0, or a negative value if
+// nothing was added.
+int mmu_reserve_pages_for_patches(const struct patch *patches, uint32_t count)
 {
     if (!mmu_globals_initialised)
         return -1;
-    uint32_t have_pages = global_mmu_conf.runtime_64k_pages;
-    uint32_t have_L2 = runtime_L2_tables();
-    uint32_t n_pages = total_pages > have_pages ? total_pages - have_pages : 0;
-    uint32_t n_L2 = total_L2_tables > have_L2 ? total_L2_tables - have_L2 : 0;
+
+    uint32_t new_pages = 0;
+    uint32_t new_sections = 0;
+    for (uint32_t c = 0; c < count; c++)
+    {
+        uint32_t addr = (uint32_t)patches[c].addr;
+        if (!IS_ROM_PTR(addr))
+            continue; // RAM is patched in place (apply_patch)
+
+        // count each page and section once
+        int seen_page = 0;
+        int seen_section = 0;
+        for (uint32_t k = 0; k < c; k++)
+        {
+            uint32_t other = (uint32_t)patches[k].addr;
+            if (!IS_ROM_PTR(other))
+                continue;
+            if ((other & 0xffff0000) == (addr & 0xffff0000))
+                seen_page = 1;
+            if ((other & 0xfff00000) == (addr & 0xfff00000))
+                seen_section = 1;
+        }
+
+        struct mmu_L2_page_info *t = L2_for_section(addr);
+        if (!seen_page && (t == NULL || t->phys_mem[(addr >> 16) & 0xf] == NULL))
+            new_pages++;
+        if (!seen_section && t == NULL)
+            new_sections++;
+    }
+
+    uint32_t old_int = cli();
+    uint32_t free_pages = global_mmu_conf.max_64k_pages_remapped
+                          + global_mmu_conf.runtime_64k_pages - backing_page_index;
+    uint32_t free_tables = 0;
+    for (uint32_t i = 0; i < global_mmu_conf.max_L2_tables; i++)
+    {
+        if (global_mmu_conf.L2_tables[i].in_use == 0
+            && global_mmu_conf.L2_tables[i].L2_table != NULL)
+            free_tables++;
+    }
+    sei(old_int);
+
+    uint32_t n_pages = new_pages > free_pages ? new_pages - free_pages : 0;
+    uint32_t n_L2 = new_sections > free_tables ? new_sections - free_tables : 0;
     return mmu_add_runtime_pages(n_pages, n_L2);
 }
 #endif

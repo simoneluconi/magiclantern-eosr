@@ -163,7 +163,9 @@
  * The runtime L2 tables live with the runtime pages in AllocateMemory; the
  * boot space only keeps a small struct per table, so room for 12 tables
  * costs under 1 KB of user_mem. Up to 13 more pages can be taken on demand
- * (mmu_reserve_runtime_pages()) by a feature when it is enabled; none at boot. */
+ * (mmu_reserve_pages_for_patches()) by a feature when it is enabled; none
+ * at boot. Pages stay mapped once used, so they are reused when the feature
+ * is enabled again. */
 #define CONFIG_MMU_REMAP_PAGES 1
 #define CONFIG_MMU_RUNTIME_PAGES 6
 #define CONFIG_MMU_RUNTIME_PAGES_MAX 19
