@@ -662,6 +662,22 @@ static int og_fps_ok(int col)
     return r && f == r->fps100;
 }
 
+/* the learnt setting, saved for the next boot with the PROP_VIDEO_MODE words seen with it */
+static CONFIG_INT("opengate.col", og_saved_col, 0);
+static CONFIG_INT("opengate.vm0", og_saved_vm0, 0);
+static CONFIG_INT("opengate.vm1", og_saved_vm1, 0);
+static CONFIG_INT("opengate.vm2", og_saved_vm2, 0);
+static CONFIG_INT("opengate.vm.ok", og_saved_vm_ok, 0);
+
+static void og_save_setting(int col)
+{
+    og_saved_col = col;
+    og_saved_vm_ok = col && og_vmode_calls > 0;
+    og_saved_vm0 = og_vmode[0];
+    og_saved_vm1 = og_vmode[1];
+    og_saved_vm2 = og_vmode[2];
+}
+
 /* learn the setting from Canon's own (unpatched) movie LV. A sample counts only when the
  * same result is seen OG_STABLE times in a row: while the movie LV starts or stops Canon
  * shows capture mode 0 and stale slots (log of the first clean-module test) */
@@ -686,14 +702,35 @@ static void og_observe_setting(void)
         if (og_setting_col != col) og_log("setting: 4K %s", og_rate_of_col(col)->name);
         og_setting_col = col;
         og_setting_seq = seq;
+        og_save_setting(col);
     }
     else
     {
         if (og_setting_bad != bad)
             og_log("setting not usable (%d): capmode %x slot %d fps idx %d fps %d", bad, cap, slot, col, og_vmode[2]);
         og_setting_col = 0;
+        og_save_setting(0);
     }
     og_setting_bad = bad;
+}
+
+/* after a boot in photo mode: reuse the setting of the last session, only if Canon's
+ * PROP_VIDEO_MODE words (delivered at boot) are the ones seen with it. Movie settings
+ * change only in movie mode, where the module observes them */
+static void og_recall_setting(void)
+{
+    static int done;
+    if (done || !og_vmode_calls) return;   /* once, after the boot delivery of the property */
+    done = 1;
+    if (og_setting_col) return;
+    const struct og_rate * r = og_rate_of_col(og_saved_col);
+    if (!r) return;
+    int same = og_saved_vm_ok && og_saved_vm0 == (int) og_vmode[0]
+            && og_saved_vm1 == (int) og_vmode[1] && og_saved_vm2 == (int) og_vmode[2];
+    og_log("last session: 4K %s, PROP_VIDEO_MODE %s", r->name, same ? "same: reused" : "different: not reused");
+    if (!same || !og_fps_ok(r->col)) return;
+    og_setting_col = r->col;
+    og_setting_seq = og_vmode_changes;
 }
 
 static int og_active_since;
@@ -747,6 +784,7 @@ static void og_step(void)
                og_vmode_calls, og_vmode_len, og_vmode[0], og_vmode[1], og_vmode[2], og_vmode[3], og_path());
     }
     og_handle_lost_locked();
+    og_recall_setting();
     if (og_removed_notice)
     {
         og_removed_notice = 0;
