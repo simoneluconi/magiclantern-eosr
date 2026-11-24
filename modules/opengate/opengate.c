@@ -679,8 +679,8 @@ static int og_player_apply(void)
 #define OG_DM_S_LEN    0x348
 #define OG_DM_MAGIC    0x4157554B       /* "KUWA" ring handle */
 #define OG_DM_SLOT     0x54
-#define OG_DM_FAST     250              /* the first preview crashed within 2 s (camera) */
-#define OG_DM_FAST_MS  10000
+#define OG_DM_FAST     0                /* every step (100 ms): the preview stops within 0.4 s */
+#define OG_DM_FAST_MS  3000
 #define OG_DM_PERIOD   2000
 #define OG_DM_TIME     240000           /* the GUI waits 200 s for the preview */
 #define OG_DM_ARM_FILE "ML/LOGS/OGDM.ARM"   /* exists while playback runs: after a crash and a
