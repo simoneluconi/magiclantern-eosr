@@ -300,10 +300,10 @@ void refresh_yuv_from_rgb(void)
         // Shall we use per-camera constants in bmp.c? Or maybe get this at runtime
         // from Ximr / XCM?
         //
-        // Under bmp_lock, as clrscr(): a pass that is half-way through must
-        // not put back pixels that clrscr() has just erased, and
-        // canon_gui_repaint() must not start while ML writes to the layer.
-        AcquireRecursiveLock(bmp_lock, 0);
+        // Under bmp_lock (taken above for the whole conversion), as
+        // clrscr(): a pass that is half-way through must not put back pixels
+        // that clrscr() has just erased, and canon_gui_repaint() must not
+        // start while ML writes to the layer.
         #ifdef CONFIG_CANON_GUI_REPAINT
         if (canon_gui_repaint_blocks_refresh())
         {
@@ -340,7 +340,6 @@ void refresh_yuv_from_rgb(void)
             }
             rgb_row = rgb_row + BMP_LAYER_WIDTH;
         }
-        ReleaseRecursiveLock(bmp_lock);
 #else
         //SJE FIXME benchmark this loop, it probably wants optimising
         for (size_t n = 0; n < BMP_VRAM_SIZE; n++)
