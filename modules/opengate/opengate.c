@@ -563,13 +563,33 @@ static int og_prepare(const struct og_rate * r)
  * ------------------------------------------------------------------------ */
 
 static int og_pages_ok;
-static int og_player_in;        /* the player words are patched (below) */
+static int og_player_in;        /* player mode patched (below), 0 = none */
+static int og_r24_in;           /* Canon 24.00p row mode patched (below), 0 = none */
 
 static int og_reserve(uint32_t pages, uint32_t l2)
 {
     int e = mmu_reserve_runtime_pages(pages, l2);
     og_log("mmu_reserve_runtime_pages(%d, %d) = %d", pages, l2, e);
     return e == 0;
+}
+
+/* the pool for the open gate (if reserved) plus the extra features that will be in. The
+ * open gate's 12 L2 tables already cover sections E04 (player) and E0B (24p row): it uses
+ * at most 9 (og_r6_190.h); its page E1F10000 is shared with the 24p row */
+static int og_reserve_extras(int player, int r24)
+{
+    if (!player && !r24) return 1;
+    int p = og_pages_ok ? og_reserve_steps[COUNT(og_reserve_steps) - 1][0] : OG_BOOT_PAGES;
+    int l = og_pages_ok ? OG_ALL_L2 : OG_BOOT_L2;
+    if (player) { p += OG_PLAYER_PAGES; l += OG_PLAYER_L2; }
+    if (r24) { p += og_pages_ok ? 1 : 2; l += 2; }
+    if (l > OG_ALL_L2) l = OG_ALL_L2;
+    if (p > OG_ALL_PAGES)
+    {
+        og_log("pages: %d needed, %d available", p, OG_ALL_PAGES);
+        return 0;
+    }
+    return og_reserve(p, l);
 }
 
 static int og_reserve_pages(void)
@@ -580,8 +600,8 @@ static int og_reserve_pages(void)
             if (!og_reserve(og_reserve_steps[i][0], og_reserve_steps[i][1])) return 0;
         og_pages_ok = 1;
     }
-    /* the player words hold pages of their own: room for both (adds nothing if done) */
-    return !og_player_in || og_reserve(OG_ALL_PAGES, OG_ALL_L2);
+    /* the player / 24p words hold pages of their own: room for all (adds nothing if done) */
+    return og_reserve_extras(og_player_in, og_r24_in);
 }
 
 static int og_commit(void)
@@ -663,10 +683,7 @@ static int og_player_apply(int mode)
         p[n] = (struct patch) { .addr = (uint8_t *) w->addr, .old_value = w->stock, .new_value = w->val,
                                 .size = 4, .is_instruction = w->insn, .description = w->what };
     }
-    /* alone: the boot pages plus its own; with the open gate: room for both */
-    int ok = og_pages_ok ? og_reserve(OG_ALL_PAGES, OG_ALL_L2)
-                         : og_reserve(OG_BOOT_PAGES + OG_PLAYER_PAGES, OG_BOOT_L2 + OG_PLAYER_L2);
-    if (!ok) { og_player_why = "Not enough memory for the patches"; return 0; }
+    if (!og_reserve_extras(1, og_r24_in)) { og_player_why = "Not enough memory for the patches"; return 0; }
     int e = apply_patches(p, n);
     og_log("player: apply mode %d (%d words) %x", mode, n, e);
     if (e) { og_player_why = e == E_PATCH_TOO_MANY_PATCHES ? "Too many ML patches active" : "ROM patch refused"; return 0; }
@@ -883,6 +900,92 @@ static void og_player_step(void)
     {
         og_player = 0;
         NotifyBox(5000, "Open gate playback refused:\n%s", og_player_why);
+    }
+}
+
+/* ------------------------------------------------------------------------
+ * Canon's hidden "24.00p" row (test; fps24/FPS24.md 7.5 steps 1-2). Mode 1: the row shows
+ * (SET does nothing, stock); mode 2: SET toggles Disable / Enable in the GUI only (the
+ * camera controller still drops the request: nothing stored, the sensor never changes).
+ * Each word group is one patch (3 patches). Not saved: OFF at boot.
+ * ------------------------------------------------------------------------ */
+
+static int og_r24;              /* menu */
+static const char * og_r24_why = "";
+
+struct og_group { const struct og_word * w; int n; };
+static const struct og_group og_r24_groups[] =
+{
+    { og_r24_p1, COUNT(og_r24_p1) },
+    { og_r24_p2, COUNT(og_r24_p2) },
+    { og_r24_p3, COUNT(og_r24_p3) },
+};
+
+static int og_r24_ngroups(int mode)
+{
+    return mode == 1 ? 1 : mode == 2 ? COUNT(og_r24_groups) : 0;
+}
+
+static int og_r24_apply(int mode)
+{
+    int ng = og_r24_ngroups(mode);
+    struct patch p[COUNT(og_r24_groups)];
+    uint32_t bufs[COUNT(og_r24_groups)][2][8];     /* old / new bytes of up to 8 words */
+    for (int g = 0; g < ng; g++)
+    {
+        const struct og_group * gr = &og_r24_groups[g];
+        for (int i = 0; i < gr->n; i++)
+        {
+            const struct og_word * w = &gr->w[i];
+            if (RD32(w->addr) != w->stock || w->addr != gr->w[0].addr + 4 * i)
+            {
+                og_log("24p: rom %08x is %08x, not %08x", w->addr, RD32(w->addr), w->stock);
+                og_r24_why = "ROM not stock";
+                return 0;
+            }
+            bufs[g][0][i] = w->stock;
+            bufs[g][1][i] = w->val;
+        }
+        p[g] = gr->n == 1
+            ? (struct patch) { .addr = (uint8_t *) gr->w[0].addr, .old_value = gr->w[0].stock,
+                               .new_value = gr->w[0].val, .size = 4, .is_instruction = gr->w[0].insn,
+                               .description = gr->w[0].what }
+            : (struct patch) { .addr = (uint8_t *) gr->w[0].addr, .old_values = (uint8_t *) bufs[g][0],
+                               .new_values = (uint8_t *) bufs[g][1], .size = 4 * gr->n,
+                               .is_instruction = gr->w[0].insn, .description = gr->w[0].what };
+    }
+    if (!og_reserve_extras(og_player_in, 1)) { og_r24_why = "Not enough memory (turn the player option off)"; return 0; }
+    int e = apply_patches(p, ng);       /* copies the arrays; all or nothing */
+    og_log("24p: apply mode %d (%d patches) %x", mode, ng, e);
+    if (e) { og_r24_why = e == E_PATCH_TOO_MANY_PATCHES ? "Too many ML patches active" : "ROM patch refused"; return 0; }
+    og_r24_in = mode;
+    og_r24_why = "";
+    return 1;
+}
+
+static void og_r24_remove(void)
+{
+    for (int g = og_r24_ngroups(og_r24_in) - 1; g >= 0; g--)
+    {
+        int e = unpatch_memory(og_r24_groups[g].w[0].addr);
+        if (e) og_log("24p: unpatch %08x: %x", og_r24_groups[g].w[0].addr, e);
+    }
+    og_r24_in = 0;
+    og_log("24p: removed");
+}
+
+/* only outside Canon's menus (they read the row when a dialog opens): in LiveView */
+static void og_r24_step(void)
+{
+    if (og_r24 == og_r24_in || !og_player_can_change()) return;
+    if (og_r24_in) og_r24_remove();
+    if (!og_r24) return;
+    if (og_r24_apply(og_r24))
+        NotifyBox(2000, "Canon 24.00p row: %s", og_r24 == 1 ? "shown" : "shown, SET toggles");
+    else
+    {
+        og_r24 = 0;
+        NotifyBox(5000, "24.00p row refused:\n%s", og_r24_why);
     }
 }
 
@@ -1311,6 +1414,7 @@ static void og_step(void)
     og_observe_setting();
     og_finish_deferred();
     og_player_step();
+    og_r24_step();
     og_dm_step();
 
     switch (og_state)
@@ -1434,6 +1538,14 @@ static MENU_UPDATE_FUNC(og_player_update)
         MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Refused: %s", og_player_why);
 }
 
+static MENU_UPDATE_FUNC(og_r24_update)
+{
+    if (og_r24 != og_r24_in)
+        MENU_SET_WARNING(MENU_WARN_INFO, "Takes effect in LiveView (not in playback or while recording).");
+    else if (!og_r24 && og_r24_why[0])
+        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Refused: %s", og_r24_why);
+}
+
 static struct menu_entry og_menu[] =
 {
     {
@@ -1453,6 +1565,15 @@ static struct menu_entry og_menu[] =
                 .update = og_player_update,
                 .help   = "Experimental: Canon's player opens 4096x2736 clips. OFF at every boot.",
                 .help2  = "Set in LiveView. Test: the 8K resize path for the preview (diagnostic).",
+            },
+            {
+                .name   = "Canon 24.00p row (test)",
+                .priv   = &og_r24,
+                .max    = 2,
+                .choices = CHOICES("OFF", "Show row", "Show row, SET toggles"),
+                .update = og_r24_update,
+                .help   = "Test: Canon's hidden 24.00p row in Movie rec. quality. GUI only, nothing stored.",
+                .help2  = "Set in LiveView. OFF at every boot. The frame rate does not change yet.",
             },
             {
                 .name   = "Debug log",
@@ -1495,6 +1616,7 @@ static unsigned int og_deinit(void)
     {
         if (og_removal_needed() && og_safe_point()) og_remove();
         if (og_player_in && og_player_can_change()) og_player_remove();
+        if (og_r24_in && og_player_can_change()) og_r24_remove();
         give_semaphore(og_lock);
     }
     return 0;

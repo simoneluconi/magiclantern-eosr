@@ -297,6 +297,28 @@ static const struct og_word og_player_x1 =
 static const struct og_word og_player_x2 =
     { 0xE0405204, 0x47F0E92D, 0x47702001, 1, "OG player test: no ORCA resize" };   /* movs r0,#1; bx lr */
 
+/* Canon's hidden "24.00p" row in Movie rec. quality (fps24/FPS24.md 7, steps 1-2 of 7.5):
+ * GUI only, nothing reaches the camera controller (its request handler is still the stock
+ * nop.w), so nothing is stored and the sensor never changes. Words from fps24/asm24.py. */
+static const struct og_word og_r24_p1[] =    /* the row's caption: 0 = hidden, 0x30B = "24.00p" */
+{
+    { 0xE1F107D0, 0x00000000, 0x0000030B, 0, "OG 24p row caption" },
+};
+static const struct og_word og_r24_p2[] =    /* value text Disable (0x17) / Enable (0x16) */
+{
+    { 0xE0B7CE64, 0xB1382400, 0xB1382417, 1, "OG 24p row value" },
+    { 0xE0B7CE68, 0xD0052801, 0xE0052416, 1, "OG 24p row value" },
+};
+static const struct og_word og_r24_p3[] =    /* SET: get, flip, set (E07A99CA/E07A99B6), refresh */
+{
+    { 0xE0B7DF00, 0xF3AF4668, 0xFD63F42B, 1, "OG 24p row SET" },
+    { 0xE0B7DF04, 0x98008000, 0x0001F080, 1, "OG 24p row SET" },
+    { 0xE0B7DF08, 0xD1F32801, 0xFD55F42B, 1, "OG 24p row SET" },
+    { 0xE0B7DF0C, 0x200068A9, 0xF88DF7FF, 1, "OG 24p row SET" },
+    { 0xE0B7DF10, 0xF7D7466A, 0xF7D7E755, 1, "OG 24p row SET" },
+};
+/* pages E1F10000 (shared with the open gate) and E0B70000, sections E1F and E0B */
+
 #define OG_PLAYER_PAGES   2
 #define OG_PLAYER_L2      1
 #define OG_ALL_PAGES      19
