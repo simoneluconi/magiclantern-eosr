@@ -26,10 +26,21 @@ fork brings it to the R6, with extra video features.
 | 💾 | **Format and keep ML** | Format the card from Canon's menu and ML is put back for you ("Format card, keep ML"). |
 | 🖼️ | **Cropmarks** | Framing guides on the LiveView, including your own bitmaps. |
 
-<p align="center"><img src="docs/r6/img/movie-menu.png" alt="ML Movie menu on the R6: time limit 59:59, heat timer, 24.00p, open gate 4K" width="540"></p>
-
 The modules sit in the **Modules** tab and turn on from the ML menu; open gate and 24.00p are
 used one at a time. Their limits are in their own info screen on the camera.
+
+### On the camera
+
+<table>
+<tr>
+<td width="50%"><img src="docs/r6/img/movie-menu.png" alt="ML Movie menu on the R6: time limit 59:59, heat timer, 24.00p, open gate 4K"></td>
+<td width="50%"><img src="docs/r6/img/internal-temp.png" alt="Debug > Internal Temp: the R6's temperature sensors, heat timer and heat budget"></td>
+</tr>
+<tr>
+<td align="center"><em>The Movie menu: clip length, heat timer, 24.00p and open gate.</em></td>
+<td align="center"><em>Internal Temp: every sensor, the heat timer and the heat budget, live.</em></td>
+</tr>
+</table>
 
 ## Also included
 
@@ -38,8 +49,6 @@ used one at a time. Their limits are in their own info screen on the camera.
 - **ML menu while recording**, with the dials moving the menu.
 - **Red display** for night and astro, motion detect, screenshots, Lua scripts, file manager.
 - **USB file transfer** (PTP) on builds that enable it.
-
-<p align="center"><img src="docs/r6/img/internal-temp.png" alt="Debug > Internal Temp: the R6's temperature sensors, heat timer and heat budget" width="540"></p>
 
 Zebras, focus peaking, the histogram, the intervalometer and the bulb timer are left to Canon,
 which already does them well. Not available yet: RAW / MLV video, dual ISO, silent pictures, and
