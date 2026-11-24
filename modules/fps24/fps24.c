@@ -15,6 +15,8 @@
 
 #include <module.h>
 #include <dryos.h>
+#include <property.h>
+#include <propvalues.h>
 #include <menu.h>
 #include <patch.h>
 #include <config.h>
