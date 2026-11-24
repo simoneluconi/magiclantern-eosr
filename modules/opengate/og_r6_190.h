@@ -324,7 +324,28 @@ static const struct og_word og_r24_p3[] =    /* SET: get, flip, set (E07A99CA/E0
     { 0xE0B7DF0C, 0x200068A9, 0xF88DF7FF, 1, "OG 24p row SET" },
     { 0xE0B7DF10, 0xF7D7466A, 0xF7D7E755, 1, "OG 24p row SET" },
 };
-/* pages E1F10000 (shared with the open gate) and E0B70000, sections E1F and E0B */
+/* step 3 (P4n): the camera controller's 0x8004005C request handler, a nop.w in 1.9.0, gets
+ * back a store: model+0x610 = value (Canon's backed-up slot 0x111), then the stock movie
+ * parameter builder E03DB970 (which ignores it: the frame rate stays 23.98p). No direct post
+ * of 0x8004005C (the P4n variant). The 0x80000025 stub after it stays equivalent, E06B6FC0
+ * (a shared branch target) is unchanged. Page E06B0000, section E06 */
+static const struct og_word og_r24_p4n[] =
+{
+    { 0xE06B6FA4, 0x4601E40E, 0x6801E40E, 1, "OG 24p CC store" },
+    { 0xE06B6FA8, 0xB5104827, 0xB5104827, 1, "OG 24p CC store" },
+    { 0xE06B6FAC, 0x23012400, 0x68806800, 1, "OG 24p CC store" },
+    { 0xE06B6FB0, 0x68004622, 0x42FCF243, 1, "OG 24p CC store" },
+    { 0xE06B6FB4, 0xF3AF6880, 0xF8C25882, 1, "OG 24p CC store" },
+    { 0xE06B6FB8, 0xF05D8000, 0x24001610, 1, "OG 24p CC store" },
+    { 0xE06B6FBC, 0x4620F90B, 0xE0032200, 1, "OG 24p CC store" },
+    { 0xE06B6FC0, 0x4601E40E, 0xB510E40E, 1, "OG 24p CC store" },
+    { 0xE06B6FC4, 0xB5104820, 0xE0062400, 1, "OG 24p CC store" },
+    { 0xE06B6FC8, 0x23012400, 0xF5242301, 1, "OG 24p CC store" },
+    { 0xE06B6FCC, 0x68004622, 0xF3AFFCD1, 1, "OG 24p CC store" },
+    { 0xE06B6FD0, 0xF3AF6880, 0xBF008000, 1, "OG 24p CC store" },
+    { 0xE06B6FD4, 0xF05D8000, 0xF05DBF00, 1, "OG 24p CC store" },
+};
+/* pages E1F10000 (shared with the open gate), E0B70000 and, for step 3, E06B0000 */
 
 #define OG_PLAYER_PAGES   2
 #define OG_PLAYER_L2      1

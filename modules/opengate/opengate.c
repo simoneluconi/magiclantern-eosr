@@ -582,7 +582,7 @@ static int og_reserve_extras(int player, int r24)
     int p = og_pages_ok ? og_reserve_steps[COUNT(og_reserve_steps) - 1][0] : OG_BOOT_PAGES;
     int l = og_pages_ok ? OG_ALL_L2 : OG_BOOT_L2;
     if (player) { p += player == 5 ? OG_PLAYER_PAGES + 1 : OG_PLAYER_PAGES; l += OG_PLAYER_L2; }
-    if (r24) { p += og_pages_ok ? 1 : 2; l += 2; }
+    if (r24) { p += (og_pages_ok ? 1 : 2) + (r24 >= 3); l += 2 + (r24 >= 3); }   /* + E06B0000 */
     if (l > OG_ALL_L2) l = OG_ALL_L2;
     if (p > OG_ALL_PAGES)
     {
@@ -931,18 +931,19 @@ static const struct og_group og_r24_groups[] =
     { og_r24_p1, COUNT(og_r24_p1) },
     { og_r24_p2, COUNT(og_r24_p2) },
     { og_r24_p3, COUNT(og_r24_p3) },
+    { og_r24_p4n, COUNT(og_r24_p4n) },
 };
 
 static int og_r24_ngroups(int mode)
 {
-    return mode == 1 ? 1 : mode == 2 ? COUNT(og_r24_groups) : 0;
+    return mode == 1 ? 1 : mode == 2 ? 3 : mode == 3 ? 4 : 0;
 }
 
 static int og_r24_apply(int mode)
 {
     int ng = og_r24_ngroups(mode);
     struct patch p[COUNT(og_r24_groups)];
-    uint32_t bufs[COUNT(og_r24_groups)][2][8];     /* old / new bytes of up to 8 words */
+    uint32_t bufs[COUNT(og_r24_groups)][2][16];    /* old / new bytes of up to 16 words */
     for (int g = 0; g < ng; g++)
     {
         const struct og_group * gr = &og_r24_groups[g];
@@ -966,7 +967,7 @@ static int og_r24_apply(int mode)
                                .new_values = (uint8_t *) bufs[g][1], .size = 4 * gr->n,
                                .is_instruction = gr->w[0].insn, .description = gr->w[0].what };
     }
-    if (!og_reserve_extras(og_player_in, 1)) { og_r24_why = "Not enough memory (turn the player option off)"; return 0; }
+    if (!og_reserve_extras(og_player_in, mode)) { og_r24_why = "Not enough memory (turn the player option off)"; return 0; }
     int e = apply_patches(p, ng);       /* copies the arrays; all or nothing */
     og_log("24p: apply mode %d (%d patches) %x", mode, ng, e);
     if (e) { og_r24_why = e == E_PATCH_TOO_MANY_PATCHES ? "Too many ML patches active" : "ROM patch refused"; return 0; }
@@ -993,7 +994,7 @@ static void og_r24_step(void)
     if (og_r24_in) og_r24_remove();
     if (!og_r24) return;
     if (og_r24_apply(og_r24))
-        NotifyBox(2000, "Canon 24.00p row: %s", og_r24 == 1 ? "shown" : "shown, SET toggles");
+        NotifyBox(2000, "Canon 24.00p row: %s", og_r24 == 1 ? "shown" : og_r24 == 2 ? "shown, SET toggles" : "SET stored by Canon");
     else
     {
         og_r24 = 0;
@@ -1370,6 +1371,22 @@ static void og_debug_step(void)
         og_log("prop %x at %d: %d %d %d %d (changed bytes mask %05x%08x); then capmode %x slot %d path %x state %d; now capmode %x slot %d path %x",
                e.prop, e.ms, e.a, e.b, e.c, e.d, e.dhi, e.dlo, e.cap, e.slot, e.path, e.state, og_capmode(), og_slot(), og_path());
     }
+    /* 24.00p setting (fps24/FPS24.md 7.5): Canon's stored value model+0x610 (model =
+     * *(*(*(0x10C28)+8)+0x34FC)) and the GUI cache *(*(0x16950+4)+0xF94); logged on change,
+     * also without the row patches (persistence after a reboot) */
+    {
+        uint32_t cc = og_rd(og_rd(0x10C28) + 8), model = og_rd(cc + 0x34FC), gui = og_rd(0x16950 + 4);
+        int stored = og_ram_ok(model, 0x614) ? (int) og_rd(model + 0x610) : -1;
+        int cache = og_ram_ok(gui, 0xF98) ? (int) og_rd(gui + 0xF94) : -1;
+        static int logged_stored = -2, logged_cache = -2;
+        if (stored != logged_stored || cache != logged_cache)
+        {
+            logged_stored = stored;
+            logged_cache = cache;
+            og_log("24p setting: stored %d, menu %d", stored, cache);
+        }
+    }
+
     /* does the core get the setting at boot, before the module is loaded? */
     static int logged_core;
     if (!logged_core && get_ms_clock() > 3000)
@@ -1582,10 +1599,10 @@ static struct menu_entry og_menu[] =
             {
                 .name   = "Canon 24.00p row (test)",
                 .priv   = &og_r24,
-                .max    = 2,
-                .choices = CHOICES("OFF", "Show row", "Show row, SET toggles"),
+                .max    = 3,
+                .choices = CHOICES("OFF", "Show row", "Show row, SET toggles", "Row, toggle, store (test)"),
                 .update = og_r24_update,
-                .help   = "Test: Canon's hidden 24.00p row in Movie rec. quality. GUI only, nothing stored.",
+                .help   = "Test: Canon's hidden 24.00p row. 3rd choice: Canon stores the setting (persists).",
                 .help2  = "Set in LiveView. OFF at every boot. The frame rate does not change yet.",
             },
             {
