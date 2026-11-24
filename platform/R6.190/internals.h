@@ -161,15 +161,17 @@
  * Putting the pages at the start of the AllocMem region before DryOS set
  * it up (0x12C9000) did not start either.
  * The runtime L2 tables live with the runtime pages in AllocateMemory; the
- * boot space only keeps a small struct per table, so room for 12 tables
- * costs under 1 KB of user_mem. Up to 13 more pages can be taken on demand
- * (mmu_reserve_pages_for_patches()) by a feature when it is enabled; none
- * at boot. Pages stay mapped once used, so they are reused when the feature
- * is enabled again. */
+ * boot space only keeps a small struct per table (76 bytes), so room for
+ * 14 tables costs about 1 KB of user_mem. Up to 18 more pages can be taken
+ * on demand (mmu_reserve_pages_for_patches()) by a feature when it is
+ * enabled; none at boot. Pages stay mapped once used, so they are reused
+ * when the feature is enabled again, and the pool must hold every feature
+ * used in one boot: opengate 11 pages, fps24 6, so 23 with the boot pages,
+ * in 12 sections (1.1 MB more of AllocateMemory once both were used). */
 #define CONFIG_MMU_REMAP_PAGES 1
 #define CONFIG_MMU_RUNTIME_PAGES 6
-#define CONFIG_MMU_RUNTIME_PAGES_MAX 19
-#define CONFIG_MMU_RUNTIME_L2_TABLES 12
+#define CONFIG_MMU_RUNTIME_PAGES_MAX 24
+#define CONFIG_MMU_RUNTIME_L2_TABLES 14
 #define CONFIG_MAX_PATCHES 48
 
 /** PROP_VIDEO_MODE (0x80000039) is never posted on R6 (0 calls in a camera
