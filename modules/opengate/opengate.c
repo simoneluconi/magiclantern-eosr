@@ -938,6 +938,58 @@ PROP_HANDLER(PROP_HDMI_CHANGE)
 
 /* Canon's LV start (0) / stop (1), posted by the GUI (menus): a moment for a held removal,
  * the old movie LV is going away and the new one is not set up yet */
+/* R6 ids (src/property.h, CONFIG_R6_190, not defined for module builds) */
+#ifndef PROP_TEMP_DRAM
+#define PROP_TEMP_DRAM          0x80030035
+#define PROP_TEMP_MIMI_L        0x800300C6
+#define PROP_TEMP_MIMI_R        0x8003008D
+#define PROP_TEMP_A             0x8003009E
+#define PROP_TEMP_TFT           0x80030081
+#define PROP_TEMP_SH            0x80030062
+#define PROP_TEMP_STATUS        0x8004000F
+#endif
+extern int get_heat_budget_percent(void);       /* src/debug.c, -1 unknown */
+extern int get_heat_remain_seconds(void);       /* src/debug.c, -1 unknown */
+
+/* environment for the debug log (log only): Canon's TempSvc temperatures (raw = deg C + 128,
+ * 0 before the first reading, src/property.h), the overheat level and the battery level, as
+ * Canon posts them; the heat budget and heat timer come from the core's cached values. Nothing
+ * is requested */
+static const uint32_t og_temp_props[6] = { PROP_TEMP_DRAM, PROP_TEMP_MIMI_L, PROP_TEMP_MIMI_R,
+                                           PROP_TEMP_A, PROP_TEMP_TFT, PROP_TEMP_SH };
+static volatile uint32_t og_temp_raw[6];
+static volatile int og_temp_status = -1;
+static volatile int og_battery = -1;
+
+static void og_temp_store(unsigned property, uint32_t v)
+{
+    for (int i = 0; i < 6; i++) if (og_temp_props[i] == property) og_temp_raw[i] = v;
+}
+
+PROP_HANDLER(PROP_TEMP_DRAM)   { og_temp_store(property, buf[0]); }
+PROP_HANDLER(PROP_TEMP_MIMI_L) { og_temp_store(property, buf[0]); }
+PROP_HANDLER(PROP_TEMP_MIMI_R) { og_temp_store(property, buf[0]); }
+PROP_HANDLER(PROP_TEMP_A)      { og_temp_store(property, buf[0]); }
+PROP_HANDLER(PROP_TEMP_TFT)    { og_temp_store(property, buf[0]); }
+PROP_HANDLER(PROP_TEMP_SH)     { og_temp_store(property, buf[0]); }
+PROP_HANDLER(PROP_TEMP_STATUS) { og_temp_status = buf[0]; }
+PROP_HANDLER(PROP_BATTERY_REPORT) { if (len >= 8) og_battery = buf[1] & 0xFF; }
+
+static int og_temp_c(int i)
+{
+    uint32_t r = og_temp_raw[i];
+    return r ? (int) r - 128 : -999;
+}
+
+/* the worker only (file access) */
+static void og_env_log(const char * when)
+{
+    og_log("env (%s): temp DRAM %d MIMI-L %d MIMI-R %d A %d TFT %d SH %d C, overheat %d, "
+           "heat budget %d%%, heat timer %d s, battery %d%%",
+           when, og_temp_c(0), og_temp_c(1), og_temp_c(2), og_temp_c(3), og_temp_c(4), og_temp_c(5),
+           og_temp_status, get_heat_budget_percent(), get_heat_remain_seconds(), og_battery);
+}
+
 PROP_HANDLER(PROP_LV_ACTION)
 {
     og_in_handler = 1;
@@ -1147,10 +1199,13 @@ static void og_debug_step(void)
     {
         og_assert_hit = 2;
         og_log("%s", og_assert_buf);
+        og_env_log("assert");
         /* what Canon logged before it: the camera still runs the worker here (camera log) */
         if (!ml_shutdown_requested)
             og_log("Canon ring to OGASSERT.BIN: %d blocks", og_dm_dump("ML/LOGS/OGASSERT.BIN"));
     }
+    static int env_boot;
+    if (!env_boot && (og_temp_raw[0] || get_ms_clock() > 10000)) { env_boot = 1; og_env_log("boot"); }
     og_assert_ctx[0] = og_state;
     og_assert_ctx[1] = lv;
     og_assert_ctx[2] = og_path();
@@ -1283,6 +1338,7 @@ static void og_step(void)
                 og_bad_samples = 0;
                 og_state = OG_APPLIED;
                 og_log("applied: 4K %s, Canon 24.00p setting %d", r->name, og_24p_stored());
+                og_env_log("apply");
                 NotifyBox(OG_READY_MS, "Open gate ready (4K %s):\nswitch to movie mode.", r->name);
                 og_ready_shown = get_ms_clock() | 1;
             }
@@ -1444,4 +1500,12 @@ MODULE_PROPHANDLERS_START()
     MODULE_PROPHANDLER(PROP_MOVIE_CROP_MODE)
     MODULE_PROPHANDLER(PROP_HDMI_CHANGE)
     MODULE_PROPHANDLER(PROP_LV_ACTION)
+    MODULE_PROPHANDLER(PROP_TEMP_DRAM)
+    MODULE_PROPHANDLER(PROP_TEMP_MIMI_L)
+    MODULE_PROPHANDLER(PROP_TEMP_MIMI_R)
+    MODULE_PROPHANDLER(PROP_TEMP_A)
+    MODULE_PROPHANDLER(PROP_TEMP_TFT)
+    MODULE_PROPHANDLER(PROP_TEMP_SH)
+    MODULE_PROPHANDLER(PROP_TEMP_STATUS)
+    MODULE_PROPHANDLER(PROP_BATTERY_REPORT)
 MODULE_PROPHANDLERS_END()
