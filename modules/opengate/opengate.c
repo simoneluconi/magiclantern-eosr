@@ -18,8 +18,9 @@
  * size, rate, crop or recording setup removes the patches from the property handler,
  * before Canon restarts the movie LiveView; the next safe point re-applies them.
  *
- * Canon's in-camera player cannot show these clips yet (its ORCA resize stops the camera
- * on 2736 rows; research/opengate/player/PLAYER-2736.md, branch r6.190-opengate-research).
+ * Canon's in-camera player refuses these clips, and its ORCA resize stops the camera on
+ * 2736 rows; a test option clamps the resize to 2160 rows, so it shows the top of the
+ * frame, stretched (research/opengate/player/PLAYER-2736.md; branch r6.190-opengate-research).
  *
  * Values and their sources: og_r6_190.h.
  */
@@ -566,18 +567,25 @@ static int og_prepare(const struct og_rate * r)
  * ------------------------------------------------------------------------ */
 
 static int og_pages_ok;
+static int og_player_in;        /* the player words are in (below) */
+
+static int og_reserve(uint32_t pages, uint32_t l2)
+{
+    int e = mmu_reserve_runtime_pages(pages, l2);
+    og_log("mmu_reserve_runtime_pages(%d, %d) = %d", pages, l2, e);
+    return e == 0;
+}
 
 static int og_reserve_pages(void)
 {
-    if (og_pages_ok) return 1;
-    for (int i = 0; i < COUNT(og_reserve_steps); i++)
+    if (!og_pages_ok)
     {
-        int e = mmu_reserve_runtime_pages(og_reserve_steps[i][0], og_reserve_steps[i][1]);
-        og_log("mmu_reserve_runtime_pages(%d, %d) = %d", og_reserve_steps[i][0], og_reserve_steps[i][1], e);
-        if (e) return 0;
+        for (int i = 0; i < COUNT(og_reserve_steps); i++)
+            if (!og_reserve(og_reserve_steps[i][0], og_reserve_steps[i][1])) return 0;
+        og_pages_ok = 1;
     }
-    og_pages_ok = 1;
-    return 1;
+    /* the player words hold 2 pages of their own (adds nothing if done) */
+    return !og_player_in || og_reserve(OG_PLAYER_PAGES_ALL, og_reserve_steps[COUNT(og_reserve_steps) - 1][1]);
 }
 
 /* the fps24 module (Canon's 24.00p row) is in when its row caption word is patched. The two
@@ -628,6 +636,105 @@ static void og_finish_deferred(void)
     int left = og_restore_ram(1);
     og_pending_deferred = left > 0;
     og_log("deferred restore: %d words left", left);
+}
+
+/* ------------------------------------------------------------------------
+ * Canon's player for the 4096x2736 clips (test; og_r6_190.h, PLAYER-2736.md 13). Its own
+ * all-or-nothing patch set, independent of the open gate. Mode 1: P1-P3, the two resize
+ * height clamps C2 and C1 and their cave; mode 2 (fallback): without C2. Applied and
+ * removed only in LiveView, where Canon's player is not set up. Not saved (OFF at boot),
+ * so a crash in the player cannot repeat by itself at the next boot.
+ * ------------------------------------------------------------------------ */
+
+static int og_player;           /* menu */
+static const char * og_player_why = "";
+
+struct og_group { const struct og_word * w; int n; };
+static const struct og_group og_player_groups[] =
+{
+    { og_player_p1, COUNT(og_player_p1) },
+    { og_player_p2, COUNT(og_player_p2) },
+    { og_player_p3, COUNT(og_player_p3) },
+    { og_player_c1, COUNT(og_player_c1) },
+    { og_player_cave, COUNT(og_player_cave) },
+    { og_player_c2, COUNT(og_player_c2) },          /* last: left out in mode 2 */
+};
+#define OG_GROUP_MAX_WORDS 8
+
+static int og_player_ngroups(int mode)
+{
+    return mode == 1 ? COUNT(og_player_groups) : mode == 2 ? COUNT(og_player_groups) - 1 : 0;
+}
+
+static int og_player_can_change(void)
+{
+    return lv && !is_play_or_qr_mode() && !RECORDING;
+}
+
+static int og_player_apply(int mode)
+{
+    int ng = og_player_ngroups(mode);
+    struct patch p[COUNT(og_player_groups)];
+    uint32_t bufs[COUNT(og_player_groups)][2][OG_GROUP_MAX_WORDS];     /* old / new bytes */
+    for (int g = 0; g < ng; g++)
+    {
+        const struct og_group * gr = &og_player_groups[g];
+        for (int i = 0; i < gr->n; i++)
+        {
+            const struct og_word * w = &gr->w[i];
+            if (gr->n > OG_GROUP_MAX_WORDS || w->addr != gr->w[0].addr + 4 * i || RD32(w->addr) != w->stock)
+            {
+                og_log("player: rom %08x is %08x, not %08x", w->addr, RD32(w->addr), w->stock);
+                og_player_why = "ROM not stock";
+                return 0;
+            }
+            bufs[g][0][i] = w->stock;
+            bufs[g][1][i] = w->val;
+        }
+        p[g] = gr->n == 1
+            ? (struct patch) { .addr = (uint8_t *) gr->w[0].addr, .old_value = gr->w[0].stock,
+                               .new_value = gr->w[0].val, .size = 4, .is_instruction = 1,
+                               .description = gr->w[0].what }
+            : (struct patch) { .addr = (uint8_t *) gr->w[0].addr, .old_values = (uint8_t *) bufs[g][0],
+                               .new_values = (uint8_t *) bufs[g][1], .size = 4 * gr->n,
+                               .is_instruction = 1, .description = gr->w[0].what };
+    }
+    int ok = og_pages_ok ? og_reserve(OG_PLAYER_PAGES_ALL, og_reserve_steps[COUNT(og_reserve_steps) - 1][1])
+                         : og_reserve(OG_PLAYER_PAGES_ONLY, OG_PLAYER_L2_ONLY);
+    if (!ok) { og_player_why = "Not enough memory for the patches"; return 0; }
+    int e = apply_patches(p, ng);       /* copies the arrays; all or nothing */
+    og_log("player: apply mode %d (%d patches) %x", mode, ng, e);
+    if (e) { og_player_why = e == E_PATCH_TOO_MANY_PATCHES ? "Too many ML patches active"
+                           : e == E_PATCH_BAD_MMU_PAGE ? "No MMU page left (reboot if fps24 was on)"
+                           : "ROM patch refused"; return 0; }
+    og_player_in = mode;
+    og_player_why = "";
+    return 1;
+}
+
+static void og_player_remove(void)
+{
+    for (int g = og_player_ngroups(og_player_in) - 1; g >= 0; g--)
+    {
+        int e = unpatch_memory(og_player_groups[g].w[0].addr);
+        if (e) og_log("player: unpatch %08x: %x", og_player_groups[g].w[0].addr, e);
+    }
+    og_player_in = 0;
+    og_log("player: removed");
+}
+
+static void og_player_step(void)
+{
+    if (og_player == og_player_in || !og_player_can_change()) return;
+    if (og_player_in) og_player_remove();
+    if (!og_player) return;
+    if (og_player_apply(og_player))
+        NotifyBox(2000, "Open gate clips: playback ON (top 2160 rows)");
+    else
+    {
+        og_player = 0;
+        NotifyBox(5000, "Open gate playback refused:\n%s", og_player_why);
+    }
 }
 
 /* ------------------------------------------------------------------------
@@ -1040,6 +1147,7 @@ static void og_step(void)
     }
     og_observe_setting();
     og_finish_deferred();
+    og_player_step();
 
     switch (og_state)
     {
@@ -1157,6 +1265,14 @@ static MENU_UPDATE_FUNC(og_update)
         MENU_SET_WARNING(MENU_WARN_INFO, "Recording: changes wait until it stops.");
 }
 
+static MENU_UPDATE_FUNC(og_player_update)
+{
+    if (og_player != og_player_in)
+        MENU_SET_WARNING(MENU_WARN_INFO, "Takes effect in LiveView (not in playback or while recording).");
+    else if (!og_player && og_player_why[0])
+        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Refused: %s", og_player_why);
+}
+
 static struct menu_entry og_menu[] =
 {
     {
@@ -1168,6 +1284,15 @@ static struct menu_entry og_menu[] =
         .help2   = "Canon: 4K 25/29.97/23.98p, crop OFF; switch to photo mode once. Play clips on a PC.",
         .submenu_width = 650,
         .children = (struct menu_entry[]) {
+            {
+                .name   = "Play open gate clips",
+                .priv   = &og_player,
+                .max    = 2,
+                .choices = CHOICES("OFF", "ON (test)", "ON, fallback (test)"),
+                .update = og_player_update,
+                .help   = "Test: Canon's player shows these clips (top 2160 rows, stretched). OFF at boot.",
+                .help2  = "Set in LiveView. Fallback: if ON gives an error. No frame grab / trim on them.",
+            },
             {
                 .name   = "Debug log",
                 .priv   = &og_debug,
@@ -1208,6 +1333,7 @@ static unsigned int og_deinit(void)
     if (take_semaphore(og_lock, 1000) == 0)
     {
         if (og_removal_needed() && og_safe_point()) og_remove();
+        if (og_player_in && og_player_can_change()) og_player_remove();
         give_semaphore(og_lock);
     }
     return 0;
