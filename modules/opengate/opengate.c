@@ -1000,6 +1000,14 @@ static void og_debug_step(void)
         og_log("prop %x at %d: %d %d %d %d; then capmode %x slot %d path %x state %d; now capmode %x slot %d path %x",
                e.prop, e.ms, e.a, e.b, e.c, e.d, e.cap, e.slot, e.path, e.state, og_capmode(), og_slot(), og_path());
     }
+    /* does the core get the setting at boot, before the module is loaded? */
+    static int logged_core;
+    if (!logged_core && get_ms_clock() > 3000)
+    {
+        logged_core = 1;
+        og_log("core at boot: size code %d fps %d movie crop %d (module calls %d)",
+               video_mode_size_code, video_mode_fps, video_mode_movie_crop, og_mcp_calls);
+    }
     static int logged_calls;
     if (!og_mcp_calls && !logged_calls && get_ms_clock() > 15000)
     {
