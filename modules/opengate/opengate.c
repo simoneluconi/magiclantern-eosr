@@ -1073,7 +1073,6 @@ static void og_decide_posting(void)
     memcpy(og_mcp_raw, raw, PROP_MOVIE_CONTROL_PARAM_LEN);
     og_mcp_raw_ok = 1;
     og_mcp_calls++;
-    const char * why = 0;
     if (changed)
     {
         og_setting_changes++;
@@ -1081,9 +1080,13 @@ static void og_decide_posting(void)
         og_log("movie setting: fps %d size %d readout %d", m.fps100, m.size, m.readout);
         /* a supported rate alone stays applied: all three columns are patched, and the
          * live check follows the live one */
+        const char * why;
         if (!og_mcp_col(&m, &why)) og_lost_note(why, 0);
+        /* a new rate also moves rate-derived bytes (0x10-0x11, 0x1C-0x1D from 25p to
+         * 29.97p, camera log): only a change with the same rate is a new recording setup */
+        return;
     }
-    if (!other || why) return;
+    if (!other) return;
     if (switched) { og_log("recording setup differs with a photo / movie switch: kept"); return; }
     if (og_removal_needed()) og_lost_note("Movie recording settings changed", 1);
 }
