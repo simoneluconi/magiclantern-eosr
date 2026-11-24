@@ -792,8 +792,16 @@ static void og_check_live(void)
     og_bad_samples = 0;
 }
 
+#define OG_READY_MS 2500
+static int og_ready_shown;     /* time the "ready" box was shown: hidden on leaving photo mode */
+
 static void og_step(void)
 {
+    if (og_ready_shown)
+    {
+        if (get_ms_clock() - og_ready_shown >= OG_READY_MS) og_ready_shown = 0;
+        else if (og_path() != OG_PATH_PHOTO) { og_ready_shown = 0; NotifyBoxHide(); }
+    }
     static int logged_vmode_changes = -1;
     if (og_debug && og_vmode_changes != logged_vmode_changes)
     {
@@ -849,7 +857,8 @@ static void og_step(void)
                 og_bad_samples = 0;
                 og_state = OG_APPLIED;
                 og_log("applied: 4K %s", r->name);
-                NotifyBox(4000, "Open gate ready (4K %s):\nswitch to movie mode.", r->name);
+                NotifyBox(OG_READY_MS, "Open gate ready (4K %s):\nswitch to movie mode.", r->name);
+                og_ready_shown = get_ms_clock() | 1;
             }
             break;
 
