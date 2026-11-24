@@ -12,11 +12,14 @@
  * in one all-or-nothing call and then the RAM words; og_remove() is the only undo.
  *
  * Changes are applied only at a safe point: photo LiveView, where path 3 (4K movie)
- * is not running and the MemoryNavigator 4K maps are not active. The movie setting is
- * learnt from Canon's own 4K <= 30p LiveView (capture mode 0x1B, sensor slot 10), so
- * the user enters movie mode once before the first apply.
+ * is not running and the MemoryNavigator 4K maps are not active. The movie setting comes
+ * from Canon's PROP_MOVIE_CONTROL_PARAM (kept by the core from boot) and is confirmed by
+ * Canon's own 4K <= 30p LiveView (capture mode 0x1B, sensor slot 10). A change of the
+ * size, rate, crop or recording setup removes the patches from the property handler,
+ * before Canon restarts the movie LiveView; the next safe point re-applies them.
  *
- * A separate option (og_player_words) lets Canon's player open the 4096x2736 clips.
+ * Canon's in-camera player cannot show these clips yet (its ORCA resize stops the camera
+ * on 2736 rows; research/opengate/player/PLAYER-2736.md, branch r6.190-opengate-research).
  *
  * Values and their sources: og_r6_190.h.
  */
@@ -95,7 +98,7 @@ static void og_log(const char * fmt, ...)
 static int (*og_old_assert)(char *, char *, int, int);
 static volatile int og_assert_hit;      /* 1 = to write, 2 = written */
 static char og_assert_buf[240];
-static uint32_t og_assert_ctx[6];       /* filled by the worker: state at the last step */
+static uint32_t og_assert_ctx[4];       /* filled by the worker: state at the last step */
 
 static void og_copy_str(char * dst, int n, const char * src)
 {
@@ -115,9 +118,9 @@ static int og_assert_handler(char * msg, char * file, int line, int arg4)
         og_copy_str(m, sizeof(m), msg);
         og_copy_str(f, sizeof(f), file);
         snprintf(og_assert_buf, sizeof(og_assert_buf),
-                 "ASSERT %s at %s:%d (arg4 %x) lr %x; last step: state %d player %d lv %d play %d path %x capmode %x",
+                 "ASSERT %s at %s:%d (arg4 %x) lr %x; last step: state %d lv %d path %x capmode %x",
                  m, f, line, arg4, __builtin_return_address(0), og_assert_ctx[0], og_assert_ctx[1],
-                 og_assert_ctx[2], og_assert_ctx[3], og_assert_ctx[4], og_assert_ctx[5]);
+                 og_assert_ctx[2], og_assert_ctx[3]);
         og_assert_hit = 1;
     }
     return og_old_assert(msg, file, line, arg4);
@@ -563,45 +566,27 @@ static int og_prepare(const struct og_rate * r)
  * ------------------------------------------------------------------------ */
 
 static int og_pages_ok;
-static int og_player_in;        /* player mode patched (below), 0 = none */
-static int og_r24_in;           /* Canon 24.00p row mode patched (below), 0 = none */
-
-static int og_reserve(uint32_t pages, uint32_t l2)
-{
-    int e = mmu_reserve_runtime_pages(pages, l2);
-    og_log("mmu_reserve_runtime_pages(%d, %d) = %d", pages, l2, e);
-    return e == 0;
-}
-
-/* the pool for the open gate (if reserved) plus the extra features that will be in. The
- * open gate's 12 L2 tables already cover sections E04 (player) and E0B (24p row): it uses
- * at most 9 (og_r6_190.h); its page E1F10000 is shared with the 24p row */
-static int og_reserve_extras(int player, int r24)
-{
-    if (!player && !r24) return 1;
-    int p = og_pages_ok ? og_reserve_steps[COUNT(og_reserve_steps) - 1][0] : OG_BOOT_PAGES;
-    int l = og_pages_ok ? OG_ALL_L2 : OG_BOOT_L2;
-    if (player) { p += player == 5 ? OG_PLAYER_PAGES + 1 : OG_PLAYER_PAGES; l += OG_PLAYER_L2; }
-    if (r24) { p += (og_pages_ok ? 1 : 2) + (r24 >= 3); l += 2 + (r24 >= 3); }   /* + E06B0000 */
-    if (l > OG_ALL_L2) l = OG_ALL_L2;
-    if (p > OG_ALL_PAGES)
-    {
-        og_log("pages: %d needed, %d available", p, OG_ALL_PAGES);
-        return 0;
-    }
-    return og_reserve(p, l);
-}
 
 static int og_reserve_pages(void)
 {
-    if (!og_pages_ok)
+    if (og_pages_ok) return 1;
+    for (int i = 0; i < COUNT(og_reserve_steps); i++)
     {
-        for (int i = 0; i < COUNT(og_reserve_steps); i++)
-            if (!og_reserve(og_reserve_steps[i][0], og_reserve_steps[i][1])) return 0;
-        og_pages_ok = 1;
+        int e = mmu_reserve_runtime_pages(og_reserve_steps[i][0], og_reserve_steps[i][1]);
+        og_log("mmu_reserve_runtime_pages(%d, %d) = %d", og_reserve_steps[i][0], og_reserve_steps[i][1], e);
+        if (e) return 0;
     }
-    /* the player / 24p words hold pages of their own: room for all (adds nothing if done) */
-    return og_reserve_extras(og_player_in, og_r24_in);
+    og_pages_ok = 1;
+    return 1;
+}
+
+/* the fps24 module (Canon's 24.00p row) is in when its row caption word is patched. The two
+ * exclude each other: 24.00p uses its own sensor timing column and fps index, and both
+ * take runtime MMU pages from the same 19-page pool (a page stays taken once used, so
+ * after the other one was in, a reboot is needed) */
+static int og_fps24_in(void)
+{
+    return RD32(OG_FPS24_ROW_WORD) != 0;
 }
 
 static int og_commit(void)
@@ -609,7 +594,10 @@ static int og_commit(void)
     if (RECORDING) { og_reason = "Stop recording first"; return 0; }
     if (!og_reserve_pages()) { og_reason = "Not enough memory for the patches"; return 0; }
     int e = og_apply_rom();
-    if (e) { og_reason = e == E_PATCH_TOO_MANY_PATCHES ? "Too many ML patches active" : "ROM patch refused"; return 0; }
+    if (e) { og_reason = e == E_PATCH_TOO_MANY_PATCHES ? "Too many ML patches active"
+                       : e == E_PATCH_CANNOT_MALLOC ? "Not enough memory for the patches"
+                       : e == E_PATCH_BAD_MMU_PAGE ? "No MMU page left (reboot if fps24 was on)"
+                       : "ROM patch refused"; return 0; }
     if (!og_check_ram())     /* re-check right before writing */
     {
         og_remove_rom();
@@ -640,366 +628,6 @@ static void og_finish_deferred(void)
     int left = og_restore_ram(1);
     og_pending_deferred = left > 0;
     og_log("deferred restore: %d words left", left);
-}
-
-/* ------------------------------------------------------------------------
- * Canon's player for 4096x2736 clips (og_player_words): its own all-or-nothing patch
- * set, independent of the open gate. The menu choice is not saved, so after a crash in
- * the player the next boot plays stock and refuses the clip instead of crashing again.
- * Applied and removed only in LiveView: Canon's player is not set up there, and its
- * decoded-frame count (P3) is read when playback is set up, so a change while it is
- * open could pair a 2736-row clip with buffers for 6 frames of 2160 rows.
- * ------------------------------------------------------------------------ */
-
-static int og_player;           /* menu (not saved: OFF at boot) */
-static const char * og_player_why = "";
-
-static int og_player_can_change(void)
-{
-    return lv && !is_play_or_qr_mode() && !RECORDING;
-}
-
-/* the words of a player mode: 1 = P1-P3; tests: 2 = + D1 (8K resize path), 3 = + X1 (no
- * ORCA convert), 4 = + X2 (no ORCA resize), 5 = + H1 (half-size resize work) */
-static const struct og_word * og_player_word(int mode, int i)
-{
-    if (i < COUNT(og_player_words)) return &og_player_words[i];
-    if (i > COUNT(og_player_words)) return 0;
-    return mode == 2 ? &og_player_d1 : mode == 3 ? &og_player_x1 : mode == 4 ? &og_player_x2
-         : mode == 5 ? &og_player_h1 : 0;
-}
-
-/* pages of a player mode: E04E0000 and E0400000, + E0410000 for H1 */
-static int og_player_pages(int mode)
-{
-    return mode == 5 ? OG_PLAYER_PAGES + 1 : OG_PLAYER_PAGES;
-}
-
-static int og_player_apply(int mode)
-{
-    struct patch p[COUNT(og_player_words) + 1];
-    int n = 0;
-    for (const struct og_word * w; (w = og_player_word(mode, n)); n++)
-    {
-        if (RD32(w->addr) != w->stock)
-        {
-            og_log("player: rom %08x (%s) is %08x, not %08x", w->addr, w->what, RD32(w->addr), w->stock);
-            og_player_why = "ROM not stock";
-            return 0;
-        }
-        p[n] = (struct patch) { .addr = (uint8_t *) w->addr, .old_value = w->stock, .new_value = w->val,
-                                .size = 4, .is_instruction = w->insn, .description = w->what };
-    }
-    if (!og_reserve_extras(mode, og_r24_in))
-    {
-        og_player_why = og_pages_ok && og_player_pages(mode) > OG_PLAYER_PAGES
-                      ? "No MMU page left: reboot, keep open gate OFF" : "Not enough memory for the patches";
-        return 0;
-    }
-    int e = apply_patches(p, n);
-    og_log("player: apply mode %d (%d words) %x", mode, n, e);
-    if (e) { og_player_why = e == E_PATCH_TOO_MANY_PATCHES ? "Too many ML patches active" : "ROM patch refused"; return 0; }
-    og_player_in = mode;
-    og_player_why = "";
-    return 1;
-}
-
-/* ------------------------------------------------------------------------
- * player diagnostics (player option + debug log): Canon's own DebugMsg ring copied to the
- * card while playback runs, to see where a 4096x2736 preview stops (PLAYER-2736.md 9.2).
- * No patch: the ring is in RAM, written by Canon; the module only lowers the store level
- * of the player's classes (one byte each, restored when the player words go) and writes
- * the ring memory to ML/LOGS/OGDM0.BIN / OGDM1.BIN every 2 s, alternately.
- * ------------------------------------------------------------------------ */
-
-#define RD8(a) (*(volatile uint8_t *)(a))
-#define OG_DM_PTR      0x52A8           /* S, DryosDebugMsg state (literal E07DA598) */
-#define OG_DM_S_LEN    0x348
-#define OG_DM_MAGIC    0x4157554B       /* "KUWA" ring handle */
-#define OG_DM_SLOT     0x54
-#define OG_DM_FAST     0                /* every step (100 ms): the preview stops within 0.4 s */
-#define OG_DM_FAST_MS  3000
-#define OG_DM_PERIOD   2000
-#define OG_DM_TIME     240000           /* the GUI waits 200 s for the preview */
-#define OG_DM_ARM_FILE "ML/LOGS/OGDM.ARM"   /* exists while playback runs: after a crash and a
-                                             * warm restart the ring is still in RAM (E012430E) */
-#define OG_DM_NCLS     6
-
-static uint8_t og_dm_cls[OG_DM_NCLS], og_dm_saved[OG_DM_NCLS];
-static int og_dm_ncls;
-static int og_dm_play_since, og_dm_last, og_dm_file;
-
-static uint32_t og_dm_s(void)
-{
-    uint32_t s = og_rd(OG_DM_PTR);
-    return og_ram_ok(s, OG_DM_S_LEN) && og_rd(s + 0x0C) ? s : 0;
-}
-
-/* lower the store level of one class to 1 (all levels kept), once, saving the old byte */
-static void og_dm_class(uint32_t s, int c)
-{
-    if (c <= 0 || c > 0xFE || og_dm_ncls >= OG_DM_NCLS) return;
-    for (int i = 0; i < og_dm_ncls; i++) if (og_dm_cls[i] == c) return;
-    uint32_t a = s + 3 * c + 0x38;
-    og_dm_cls[og_dm_ncls] = c;
-    og_dm_saved[og_dm_ncls] = RD8(a);
-    og_dm_ncls++;
-    RD8(a) = 1;
-    og_log("dm: class %x store level %d -> 1", c, og_dm_saved[og_dm_ncls - 1]);
-}
-
-/* the player's classes (PLAYER-2736.md 9.4); their pointers are 0 until the player starts */
-static void og_dm_arm(void)
-{
-    uint32_t s = og_dm_s();
-    if (!s) return;
-    og_dm_class(s, 0x1F);
-    uint32_t p;
-    if ((p = og_rd(0x9D48)) && og_ram_ok(p & ~3, 8)) og_dm_class(s, RD8(p + 4));
-    og_dm_class(s, RD8(0x243E4));
-    if ((p = og_rd(0x243EC)) && og_ram_ok(p & ~3, 4)) og_dm_class(s, RD8(p));
-    if ((p = og_rd(0x3754C)) && og_ram_ok(p & ~3, 0x24)) og_dm_class(s, RD8(p + 0x20));
-    if ((p = og_rd(0x3755C)) && og_ram_ok(p & ~3, 4)) og_dm_class(s, RD8(p));
-}
-
-/* every class at store level 1 for the first seconds of playback (the ORCA engine and
- * wrapper classes are not known in advance); saved and restored as a whole */
-#define OG_DM_ALL_MS   10000
-static uint8_t og_dm_all_saved[256];
-static int og_dm_all_on;
-
-static void og_dm_all(int on)
-{
-    uint32_t s = og_dm_s();
-    if (!s || on == og_dm_all_on) return;
-    if (on)
-        for (int c = 0; c < 256; c++) { og_dm_all_saved[c] = RD8(s + 3 * c + 0x38); RD8(s + 3 * c + 0x38) = 1; }
-    else
-    {
-        og_log("dm: all classes restored (class 1f store level was %d)", RD8(s + 3 * 0x1F + 0x38));
-        for (int c = 0; c < 256; c++) RD8(s + 3 * c + 0x38) = og_dm_all_saved[c];
-    }
-    og_dm_all_on = on;
-}
-
-static void og_dm_restore(void)
-{
-    og_dm_all(0);
-    uint32_t s = og_dm_s();
-    for (int i = 0; s && i < og_dm_ncls; i++) RD8(s + 3 * og_dm_cls[i] + 0x38) = og_dm_saved[i];
-    og_dm_ncls = 0;
-}
-
-/* a ring handle and its length, or 0 */
-static uint32_t og_dm_ring(uint32_t s, int k, uint32_t * len)
-{
-    uint32_t h = og_rd(s + 0x10 + 4 * k);
-    if (!og_ram_ok(h, 0x80) || og_rd(h) != OG_DM_MAGIC) return 0;
-    uint32_t n = 0;
-    for (int sub = 0; sub < 2; sub++)
-    {
-        uint32_t off = og_rd(h + 4 * (2 + 15 * sub)), cnt = og_rd(h + 4 * (4 + 15 * sub));
-        if (off < 0x80 || off > 0x100000 || cnt > 0x4000) return 0;
-        n = MAX(n, off + cnt * OG_DM_SLOT);
-    }
-    if (!og_ram_ok(h, n)) return 0;
-    *len = n;
-    return h;
-}
-
-static void og_dm_dump(const char * name)
-{
-    uint32_t s = og_dm_s();
-    if (!s) return;
-    uint32_t h[3], n[3], nb = 1;
-    for (int k = 0; k < 3; k++) { h[k] = og_dm_ring(s, k, &n[k]); if (h[k]) nb++; }
-    FILE * f = FIO_CreateFile(name);
-    if (!f) return;
-    uint32_t hdr[4] = { 0x4D44474F, 1, s, nb };    /* "OGDM", version, S, blocks */
-    FIO_WriteFile(f, hdr, sizeof(hdr));
-    uint32_t b[2] = { s, OG_DM_S_LEN };
-    FIO_WriteFile(f, b, sizeof(b));
-    FIO_WriteFile(f, (void *) s, OG_DM_S_LEN);
-    for (int k = 0; k < 3; k++)
-    {
-        if (!h[k]) continue;
-        b[0] = h[k]; b[1] = n[k];
-        FIO_WriteFile(f, b, sizeof(b));
-        FIO_WriteFile(f, (void *) h[k], n[k]);
-    }
-    FIO_CloseFile(f);
-    /* writes since boot of each sub-ring: if they stop, Canon itself stopped logging */
-    og_log("dm %s: rings %x %x %x, writes %d/%d %d/%d %d/%d", name, h[0], h[1], h[2],
-           h[0] ? og_rd(h[0] + 24) : 0, h[0] ? og_rd(h[0] + 84) : 0,
-           h[1] ? og_rd(h[1] + 24) : 0, h[1] ? og_rd(h[1] + 84) : 0,
-           h[2] ? og_rd(h[2] + 24) : 0, h[2] ? og_rd(h[2] + 84) : 0);
-}
-
-static int og_dm_file_exists(const char * name)
-{
-    uint32_t size;
-    return FIO_GetFileSize(name, &size) == 0;
-}
-
-static void og_dm_step(void)
-{
-    /* first step after a boot: a playback session that did not end left the marker */
-    static int boot_checked;
-    if (!boot_checked && og_debug)
-    {
-        boot_checked = 1;
-        if (og_dm_file_exists(OG_DM_ARM_FILE))
-        {
-            og_dm_dump("ML/LOGS/OGDMBOOT.BIN");
-            FIO_RemoveFile(OG_DM_ARM_FILE);
-            og_log("dm: playback did not end last session: ring saved at boot");
-        }
-    }
-
-    int play = og_player_in && og_debug && is_play_or_qr_mode();
-    if (og_player_in && og_debug) og_dm_arm();      /* polls for the player's class pointers */
-    if (!play)
-    {
-        if (og_dm_play_since)
-        {
-            og_dm_play_since = 0;
-            og_dm_all(0);
-            FIO_RemoveFile(OG_DM_ARM_FILE);         /* left playback normally */
-        }
-        return;
-    }
-    int now = get_ms_clock();
-    if (!og_dm_play_since)
-    {
-        og_dm_play_since = now;
-        og_dm_last = now - OG_DM_PERIOD;
-        FILE * f = FIO_CreateFile(OG_DM_ARM_FILE);
-        if (f) FIO_CloseFile(f);
-        og_dm_all(1);
-    }
-    if (now - og_dm_play_since > OG_DM_ALL_MS) og_dm_all(0);
-    int period = now - og_dm_play_since < OG_DM_FAST_MS ? OG_DM_FAST : OG_DM_PERIOD;
-    if (now - og_dm_play_since > OG_DM_TIME || now - og_dm_last < period) return;
-    og_dm_last = now;
-    char name[32];
-    snprintf(name, sizeof(name), "ML/LOGS/OGDM%d.BIN", og_dm_file);
-    og_dm_file ^= 1;
-    og_dm_dump(name);
-}
-
-static void og_player_remove(void)
-{
-    og_dm_restore();
-    int n = 0;
-    while (og_player_word(og_player_in, n)) n++;
-    for (int i = n - 1; i >= 0; i--)
-    {
-        int e = unpatch_memory(og_player_word(og_player_in, i)->addr);
-        if (e) og_log("player: unpatch %08x: %x", og_player_word(og_player_in, i)->addr, e);
-    }
-    og_player_in = 0;
-    og_log("player: removed");
-}
-
-static void og_player_step(void)
-{
-    if (og_player == og_player_in || !og_player_can_change()) return;
-    if (og_player_in) og_player_remove();           /* off, or another mode */
-    if (!og_player) return;
-    if (og_player_apply(og_player))
-        NotifyBox(2000, "Open gate clips: playback ON");
-    else
-    {
-        og_player = 0;
-        NotifyBox(5000, "Open gate playback refused:\n%s", og_player_why);
-    }
-}
-
-/* ------------------------------------------------------------------------
- * Canon's hidden "24.00p" row (test; fps24/FPS24.md 7.5 steps 1-2). Mode 1: the row shows
- * (SET does nothing, stock); mode 2: SET toggles Disable / Enable in the GUI only (the
- * camera controller still drops the request: nothing stored, the sensor never changes).
- * Each word group is one patch (3 patches). Not saved: OFF at boot.
- * ------------------------------------------------------------------------ */
-
-static int og_r24;              /* menu */
-static const char * og_r24_why = "";
-
-struct og_group { const struct og_word * w; int n; };
-static const struct og_group og_r24_groups[] =
-{
-    { og_r24_p1, COUNT(og_r24_p1) },
-    { og_r24_p2, COUNT(og_r24_p2) },
-    { og_r24_p3, COUNT(og_r24_p3) },
-    { og_r24_p4n, COUNT(og_r24_p4n) },
-};
-
-static int og_r24_ngroups(int mode)
-{
-    return mode == 1 ? 1 : mode == 2 ? 3 : mode == 3 ? 4 : 0;
-}
-
-static int og_r24_apply(int mode)
-{
-    int ng = og_r24_ngroups(mode);
-    struct patch p[COUNT(og_r24_groups)];
-    uint32_t bufs[COUNT(og_r24_groups)][2][16];    /* old / new bytes of up to 16 words */
-    for (int g = 0; g < ng; g++)
-    {
-        const struct og_group * gr = &og_r24_groups[g];
-        for (int i = 0; i < gr->n; i++)
-        {
-            const struct og_word * w = &gr->w[i];
-            if (RD32(w->addr) != w->stock || w->addr != gr->w[0].addr + 4 * i)
-            {
-                og_log("24p: rom %08x is %08x, not %08x", w->addr, RD32(w->addr), w->stock);
-                og_r24_why = "ROM not stock";
-                return 0;
-            }
-            bufs[g][0][i] = w->stock;
-            bufs[g][1][i] = w->val;
-        }
-        p[g] = gr->n == 1
-            ? (struct patch) { .addr = (uint8_t *) gr->w[0].addr, .old_value = gr->w[0].stock,
-                               .new_value = gr->w[0].val, .size = 4, .is_instruction = gr->w[0].insn,
-                               .description = gr->w[0].what }
-            : (struct patch) { .addr = (uint8_t *) gr->w[0].addr, .old_values = (uint8_t *) bufs[g][0],
-                               .new_values = (uint8_t *) bufs[g][1], .size = 4 * gr->n,
-                               .is_instruction = gr->w[0].insn, .description = gr->w[0].what };
-    }
-    if (!og_reserve_extras(og_player_in, mode)) { og_r24_why = "Not enough memory (turn the player option off)"; return 0; }
-    int e = apply_patches(p, ng);       /* copies the arrays; all or nothing */
-    og_log("24p: apply mode %d (%d patches) %x", mode, ng, e);
-    if (e) { og_r24_why = e == E_PATCH_TOO_MANY_PATCHES ? "Too many ML patches active" : "ROM patch refused"; return 0; }
-    og_r24_in = mode;
-    og_r24_why = "";
-    return 1;
-}
-
-static void og_r24_remove(void)
-{
-    for (int g = og_r24_ngroups(og_r24_in) - 1; g >= 0; g--)
-    {
-        int e = unpatch_memory(og_r24_groups[g].w[0].addr);
-        if (e) og_log("24p: unpatch %08x: %x", og_r24_groups[g].w[0].addr, e);
-    }
-    og_r24_in = 0;
-    og_log("24p: removed");
-}
-
-/* only outside Canon's menus (they read the row when a dialog opens): in LiveView */
-static void og_r24_step(void)
-{
-    if (og_r24 == og_r24_in || !og_player_can_change()) return;
-    if (og_r24_in) og_r24_remove();
-    if (!og_r24) return;
-    if (og_r24_apply(og_r24))
-        NotifyBox(2000, "Canon 24.00p row: %s", og_r24 == 1 ? "shown" : og_r24 == 2 ? "shown, SET toggles" : "SET stored by Canon");
-    else
-    {
-        og_r24 = 0;
-        NotifyBox(5000, "24.00p row refused:\n%s", og_r24_why);
-    }
 }
 
 /* ------------------------------------------------------------------------
@@ -1352,16 +980,10 @@ static void og_debug_step(void)
         og_assert_hit = 2;
         og_log("%s", og_assert_buf);
     }
-    int play = is_play_or_qr_mode();
     og_assert_ctx[0] = og_state;
-    og_assert_ctx[1] = og_player_in;
-    og_assert_ctx[2] = lv;
-    og_assert_ctx[3] = play;
-    og_assert_ctx[4] = og_path();
-    og_assert_ctx[5] = og_capmode();
-    static int logged_play = -1;        /* -1: player words not in (nothing logged yet) */
-    if (og_player_in && logged_play >= 0 && play != logged_play) og_log("playback %s", play ? "entered" : "left");
-    logged_play = og_player_in ? play : -1;
+    og_assert_ctx[1] = lv;
+    og_assert_ctx[2] = og_path();
+    og_assert_ctx[3] = og_capmode();
 
     /* property postings, with the LiveView state seen by the handler and now */
     while (og_ev_r != og_ev_w)
@@ -1370,30 +992,6 @@ static void og_debug_step(void)
         og_ev_r++;
         og_log("prop %x at %d: %d %d %d %d (changed bytes mask %05x%08x); then capmode %x slot %d path %x state %d; now capmode %x slot %d path %x",
                e.prop, e.ms, e.a, e.b, e.c, e.d, e.dhi, e.dlo, e.cap, e.slot, e.path, e.state, og_capmode(), og_slot(), og_path());
-    }
-    /* 24.00p setting (fps24/FPS24.md 7.5): Canon's stored value model+0x610 (model =
-     * *(*(*(0x10C28)+8)+0x34FC)) and the GUI cache *(*(0x16950+4)+0xF94); logged on change,
-     * also without the row patches (persistence after a reboot) */
-    {
-        uint32_t cc = og_rd(og_rd(0x10C28) + 8), model = og_rd(cc + 0x34FC), gui = og_rd(0x16950 + 4);
-        int stored = og_ram_ok(model, 0x614) ? (int) og_rd(model + 0x610) : -1;
-        int cache = og_ram_ok(gui, 0xF98) ? (int) og_rd(gui + 0xF94) : -1;
-        static int logged_stored = -2, logged_cache = -2;
-        if (stored != logged_stored || cache != logged_cache)
-        {
-            logged_stored = stored;
-            logged_cache = cache;
-            og_log("24p setting: stored %d, menu %d", stored, cache);
-        }
-    }
-
-    /* does the core get the setting at boot, before the module is loaded? */
-    static int logged_core;
-    if (!logged_core && get_ms_clock() > 3000)
-    {
-        logged_core = 1;
-        og_log("core at boot: size code %d fps %d (x100 %d) movie crop %d (module calls %d)",
-               video_mode_size_code, video_mode_fps, video_mode_fps_x100, video_mode_movie_crop, og_mcp_calls);
     }
     static int logged_calls;
     if (!og_mcp_calls && !logged_calls && get_ms_clock() > 15000)
@@ -1442,9 +1040,6 @@ static void og_step(void)
     }
     og_observe_setting();
     og_finish_deferred();
-    og_player_step();
-    og_r24_step();
-    og_dm_step();
 
     switch (og_state)
     {
@@ -1459,6 +1054,7 @@ static void og_step(void)
                 const struct og_rate * r = og_rate_of_col(col);
                 const char * wait =
                     og_pending_deferred ? "deferred restore" : og_hdmi ? "HDMI" :
+                    og_fps24_in() ? "fps24 module on" :
                     !lv ? "no LV" : !og_safe_point() ? "not a safe point" :
                     !r ? "setting unknown" : og_setting_seq != og_setting_changes ? "setting changed" :
                     !og_prop_ok(col) ? "movie setting" : 0;
@@ -1542,12 +1138,14 @@ static MENU_UPDATE_FUNC(og_update)
             MENU_SET_VALUE("Waiting");
             if (og_hdmi)
                 MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Disconnect HDMI.");
+            else if (og_fps24_in())
+                MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Turn the fps24 module off (then reboot).");
             else if (og_setting_bad == 2)
                 MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Turn Canon movie cropping OFF.");
             else if (og_setting_bad == 3)
-                MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Use 25p, 29.97p or 23.98p (24.00p / 30.00p not supported).");
+                MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Use 4K 25p, 29.97p or 23.98p.");
             else if (og_setting_bad || !og_setting_col)
-                MENU_SET_WARNING(MENU_WARN_ADVICE, "Set Canon movie size to 4K 25p / 29.97p / 23.98p and enter movie mode once.");
+                MENU_SET_WARNING(MENU_WARN_ADVICE, "Set Canon movie size to 4K 25p / 29.97p / 23.98p, crop OFF.");
             else
                 MENU_SET_WARNING(MENU_WARN_ADVICE, "Switch to photo mode once to apply.");
             break;
@@ -1559,22 +1157,6 @@ static MENU_UPDATE_FUNC(og_update)
         MENU_SET_WARNING(MENU_WARN_INFO, "Recording: changes wait until it stops.");
 }
 
-static MENU_UPDATE_FUNC(og_player_update)
-{
-    if (og_player != og_player_in)
-        MENU_SET_WARNING(MENU_WARN_INFO, "Takes effect in LiveView (not in playback or while recording).");
-    else if (!og_player && og_player_why[0])
-        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Refused: %s", og_player_why);
-}
-
-static MENU_UPDATE_FUNC(og_r24_update)
-{
-    if (og_r24 != og_r24_in)
-        MENU_SET_WARNING(MENU_WARN_INFO, "Takes effect in LiveView (not in playback or while recording).");
-    else if (!og_r24 && og_r24_why[0])
-        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Refused: %s", og_r24_why);
-}
-
 static struct menu_entry og_menu[] =
 {
     {
@@ -1582,29 +1164,10 @@ static struct menu_entry og_menu[] =
         .priv    = &og_ui,
         .max     = 1,
         .update  = og_update,
-        .help    = "Whole sensor (3:2) in 4K: 4096x2736 HEVC 10-bit, 25p / 29.97p / 23.98p.",
-        .help2   = "Canon: 4K 25/29.97/23.98p, 10-bit, crop OFF. Enter movie, then photo mode once.",
+        .help    = "Whole sensor (3:2) in 4K: 4096x2736 HEVC 10-bit or H.264, 25p / 29.97p / 23.98p.",
+        .help2   = "Canon: 4K 25/29.97/23.98p, crop OFF; switch to photo mode once. Play clips on a PC.",
         .submenu_width = 650,
         .children = (struct menu_entry[]) {
-            {
-                .name   = "Play open gate clips",
-                .priv   = &og_player,
-                .max    = 5,
-                .choices = CHOICES("OFF", "ON", "ON, 8K resize (test)", "ON, no convert (test)", "ON, no resize (test)",
-                                   "ON, half-size resize (test)"),
-                .update = og_player_update,
-                .help   = "Experimental: Canon's player opens 4096x2736 clips. OFF at every boot.",
-                .help2  = "Set in LiveView. Test: the 8K resize path for the preview (diagnostic).",
-            },
-            {
-                .name   = "Canon 24.00p row (test)",
-                .priv   = &og_r24,
-                .max    = 3,
-                .choices = CHOICES("OFF", "Show row", "Show row, SET toggles", "Row, toggle, store (test)"),
-                .update = og_r24_update,
-                .help   = "Test: Canon's hidden 24.00p row. 3rd choice: Canon stores the setting (persists).",
-                .help2  = "Set in LiveView. OFF at every boot. The frame rate does not change yet.",
-            },
             {
                 .name   = "Debug log",
                 .priv   = &og_debug,
@@ -1645,8 +1208,6 @@ static unsigned int og_deinit(void)
     if (take_semaphore(og_lock, 1000) == 0)
     {
         if (og_removal_needed() && og_safe_point()) og_remove();
-        if (og_player_in && og_player_can_change()) og_player_remove();
-        if (og_r24_in && og_player_can_change()) og_r24_remove();
         give_semaphore(og_lock);
     }
     return 0;
