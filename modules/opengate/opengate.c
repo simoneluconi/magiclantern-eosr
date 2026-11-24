@@ -300,13 +300,12 @@ static int og_apply_rom(void)
     }
     /* runtime MMU pages for what these patches still need (pages remapped before, by us or
      * another feature, are reused: a re-enable adds nothing) */
-    /* in 3 steps (a third of the patches, two thirds, all): each call allocates only what is
-     * still missing, so no single ~700 KB AllocateMemory block (one failed once, run 42) */
-    for (int step = 1; step <= 3 && !err; step++)
+    /* the core allocates in small blocks (no ~700 KB AllocateMemory block: one failed once,
+     * run 42) and keeps what it added if one fails */
+    if (!err)
     {
-        int m = np * step / 3;
-        int e = mmu_reserve_pages_for_patches(p, m);
-        og_log("mmu_reserve_pages_for_patches(%d of %d) = %d", m, np, e);
+        int e = mmu_reserve_pages_for_patches(p, np);
+        og_log("mmu_reserve_pages_for_patches(%d) = %d", np, e);
         if (e) err = OG_E_NO_PAGES;
     }
     if (!err) err = apply_patches(p, np);   /* copies the arrays; all or nothing */
