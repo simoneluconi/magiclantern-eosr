@@ -106,6 +106,23 @@ extern struct semaphore * gui_sem;
 static struct semaphore * menu_redraw_sem;
 static int menu_damage;
 static int menu_shown = false;
+
+/* Some cams stop LiveView while the ML menu is open (it opens over Canon's
+ * MENU, R6 / RP). The menu warnings then judge LiveView features by the
+ * LiveView the menu was opened from, where they will run. */
+static int menu_opened_in_lv = 0;
+static int menu_lv(void)
+{
+    return lv || (menu_shown && menu_opened_in_lv);
+}
+
+/* GlobalDraw as it will be in that LiveView: the setting allows LiveView */
+static int menu_global_draw(void)
+{
+    if (get_global_draw())
+        return 1;
+    return !lv && menu_shown && menu_opened_in_lv && (get_global_draw_setting() & 1);
+}
 static int menu_lv_transparent_mode; // for ISO, kelvin...
 static int config_dirty = 0;
 
@@ -2405,15 +2422,15 @@ static int check_default_warnings(struct menu_entry * entry, char* warning)
     }
     
     // default warnings
-         if (DEPENDS_ON(DEP_GLOBAL_DRAW) && !get_global_draw())
+         if (DEPENDS_ON(DEP_GLOBAL_DRAW) && !menu_global_draw())
         snprintf(warning, MENU_MAX_WARNING_LEN, GDR_WARNING_MSG);
     else if (DEPENDS_ON(DEP_MOVIE_MODE) && !is_movie_mode())
         snprintf(warning, MENU_MAX_WARNING_LEN, "This feature only works in movie mode.");
     else if (DEPENDS_ON(DEP_PHOTO_MODE) && is_movie_mode())
         snprintf(warning, MENU_MAX_WARNING_LEN, "This feature only works in photo mode.");
-    else if (DEPENDS_ON(DEP_LIVEVIEW) && !lv)
+    else if (DEPENDS_ON(DEP_LIVEVIEW) && !menu_lv())
         snprintf(warning, MENU_MAX_WARNING_LEN, "This feature only works in LiveView.");
-    else if (DEPENDS_ON(DEP_NOT_LIVEVIEW) && lv)
+    else if (DEPENDS_ON(DEP_NOT_LIVEVIEW) && menu_lv())
         snprintf(warning, MENU_MAX_WARNING_LEN, "This feature does not work in LiveView.");
     else if (DEPENDS_ON(DEP_AUTOFOCUS) && is_manual_focus())
         snprintf(warning, MENU_MAX_WARNING_LEN, "This feature requires autofocus enabled.");
@@ -2454,15 +2471,15 @@ static int check_default_warnings(struct menu_entry * entry, char* warning)
     
     if (entry->selected) // check recommendations
     {
-             if (WORKS_BEST_IN(DEP_GLOBAL_DRAW) && !get_global_draw())
+             if (WORKS_BEST_IN(DEP_GLOBAL_DRAW) && !menu_global_draw())
             snprintf(warning, MENU_MAX_WARNING_LEN, "This feature works best with GlobalDraw enabled.");
         else if (WORKS_BEST_IN(DEP_MOVIE_MODE) && !is_movie_mode())
             snprintf(warning, MENU_MAX_WARNING_LEN, "This feature works best in movie mode.");
         else if (WORKS_BEST_IN(DEP_PHOTO_MODE) && is_movie_mode())
             snprintf(warning, MENU_MAX_WARNING_LEN, "This feature works best in photo mode.");
-        else if (WORKS_BEST_IN(DEP_LIVEVIEW) && !lv)
+        else if (WORKS_BEST_IN(DEP_LIVEVIEW) && !menu_lv())
             snprintf(warning, MENU_MAX_WARNING_LEN, "This feature works best in LiveView.");
-        else if (WORKS_BEST_IN(DEP_NOT_LIVEVIEW) && lv)
+        else if (WORKS_BEST_IN(DEP_NOT_LIVEVIEW) && menu_lv())
             snprintf(warning, MENU_MAX_WARNING_LEN, "This feature works best outside LiveView.");
         else if (WORKS_BEST_IN(DEP_AUTOFOCUS) && is_manual_focus())
             snprintf(warning, MENU_MAX_WARNING_LEN, "This feature works best with autofocus enabled.");
@@ -5697,6 +5714,7 @@ static void menu_open()
     menu_help_active = 0;
     keyrepeat = 0;
     menu_shown = 1;
+    menu_opened_in_lv = lv;
     //~ menu_hidden_should_display_help = 0;
     if (lv)
         menu_zebras_mirror_dirty = 1;
