@@ -442,20 +442,20 @@ static MENU_UPDATE_FUNC(f24_update)
     if (s >= 0) MENU_SET_RINFO("%s%s", s ? "Enable" : "Disable", f24_live() ? ", 24.00" : "");
 
     if (!f24_ui && f24_p5_in())
-        MENU_SET_WARNING(MENU_WARN_INFO, "Turns off in LiveView, outside playback and recording.");
+        MENU_SET_WARNING(MENU_WARN_INFO, "Turns off in LiveView, outside playback and REC.");
     else if (!f24_ui && f24_row_in())
         MENU_SET_WARNING(MENU_WARN_ADVICE, "Still 24.00p: set Canon's 24.00p row to Disable.");
     else if (!f24_ui && f24_why[0])
         MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Refused: %s", f24_why);
     else if (f24_ui && !f24_all_in())
-        MENU_SET_WARNING(MENU_WARN_INFO, "Takes effect in LiveView, outside playback and recording.");
+        MENU_SET_WARNING(MENU_WARN_INFO, "Applies in LiveView, outside playback and REC.");
     else if (f24_ui && f24_live())
         MENU_SET_WARNING(MENU_WARN_INFO, "24.00p live in 4K UHD (fps index %d, VD %d).",
                          f24_rd(F24_TIMING_INFO + 0x24), f24_rd(F24_IMGCTRL + 0x10));
     else if (f24_ui && s != 1)
-        MENU_SET_WARNING(MENU_WARN_ADVICE, "Set Canon's 24.00p row (Movie rec. quality) to Enable.");
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "Set Canon's 24.00p row to Enable.");
     else if (f24_ui && f24_target())
-        MENU_SET_WARNING(MENU_WARN_ADVICE, "Waiting: set 24.00p to Disable, then Enable again.");
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "Waiting: set the row to Disable, then Enable.");
     else if (f24_ui)
         MENU_SET_WARNING(MENU_WARN_ADVICE, "Works in 4K UHD 23.98p (NTSC).");
 }
@@ -467,8 +467,8 @@ static struct menu_entry f24_menu[] =
         .priv   = &f24_ui,
         .max    = 1,
         .update = f24_update,
-        .help   = "True 24.00p in 4K UHD, through Canon's 24.00p row.",
-        .help2  = "Set 4K UHD 23.98p, then 24.00p: Enable in Canon's menu.",
+        .help   = "True 24.00p in 4K UHD. Set 4K UHD 23.98p first,",
+        .help2  = "then Canon's 24.00p row (Movie rec. quality): Enable.",
         .children = (struct menu_entry[]) {
             {
                 .name   = "Debug dump",
