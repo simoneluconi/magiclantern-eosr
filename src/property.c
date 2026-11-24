@@ -348,12 +348,24 @@ static int is_prop_allowed(uint32_t property)
 
 void prop_request_change(unsigned property, const void* addr, size_t len)
 {
-#if defined(CONFIG_BATTERY_INFO) && !defined(CONFIG_PROP_REQUEST_CHANGE)
-    /* Without property writes, CONFIG_BATTERY_INFO still needs its poll:
-     * PROP_BATTERY_REPORT with len 1 asks Canon for a new battery report,
-     * as Canon's own Battery info menu does; it changes no setting.
-     * On D678 it must also be in prop_write_allow[]. Nothing else is sent. */
-    if (property == PROP_BATTERY_REPORT && len == 1 && is_prop_allowed(property))
+#ifndef CONFIG_PROP_REQUEST_CHANGE
+    /* Without property writes, a few requests that change no setting are
+     * still sent, each in the exact form Canon's own code uses, and on D678
+     * only if prop_write_allow[] lists the property. Nothing else is sent.
+     * - CONFIG_BATTERY_INFO's poll: PROP_BATTERY_REPORT with len 1 asks Canon
+     *   for a new battery report, as Canon's own Battery info menu does;
+     * - CONFIG_RESTORE_AFTER_FORMAT's restart: PROP_REBOOT, value 0, len 4,
+     *   as Canon's firmware update "complete" dialogs send it. */
+    int send = 0;
+    #ifdef CONFIG_BATTERY_INFO
+    if (property == PROP_BATTERY_REPORT && len == 1)
+        send = 1;
+    #endif
+    #ifdef CONFIG_RESTORE_AFTER_FORMAT
+    if (property == PROP_REBOOT && len == 4 && addr && *(const uint32_t *)addr == 0)
+        send = 1;
+    #endif
+    if (send && is_prop_allowed(property))
     {
         extern void _prop_request_change(unsigned property, const void* addr, size_t len);
         _prop_request_change(property, addr, len);

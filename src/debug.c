@@ -1712,35 +1712,132 @@ PROP_HANDLER(PROP_ISO)
 
 static int keep_ml_after_format = 1;
 
-static void HijackFormatDialogBox()
-{
-    if (MEM(DIALOG_MnCardFormatBegin) == 0) return;
-    struct gui_task * current = gui_task_list.current;
-    struct dialog * dialog = current->priv;
-    if (dialog && !streq(dialog->type, "DIALOG")) return;
+#ifdef CONFIG_DIALOG_TEXT_IN_CTRLSRV
+/* Cams where dialog_redraw() doesn't repaint a dialog that is already
+ * shown, and where Canon's dialog painting must not run in ML's tasks
+ * (internals.h). The text is changed on the format dialog itself
+ * (DIALOG_MnCardFormatBegin), then repainted with dialog_refresh(), both
+ * in Canon's task CtrlSrv, where Canon changes and closes its dialogs: so
+ * the dialog can't be closed half-way. The text is copied; the dialog is
+ * looked up again in CtrlSrv, and nothing happens once it is closed. */
+extern int CtrlSrv_SetTimerAfter(int delay_ms, void (*cbr)(int, void *), void (*overrun_cbr)(int, void *), void *arg);
+extern int dialog_refresh(struct dialog * dialog);
 
-    if (keep_ml_after_format)
-        dialog_set_property_str(dialog, 4, "Format card, keep ML " FORMAT_BTN_NAME);
-    else
-        dialog_set_property_str(dialog, 4, "Format card, remove ML " FORMAT_BTN_NAME);
-    dialog_redraw(dialog);
+#define FORMAT_DIALOG_ITEMS 16
+static char format_dialog_text[FORMAT_DIALOG_ITEMS][64];
+static volatile uint32_t format_dialog_dirty = 0;   /* one bit per item */
+static volatile int format_dialog_pending = 0;
+
+static void format_dialog_text_cbr(int unused, void *arg)
+{
+    format_dialog_pending = 0; /* later changes schedule a new call */
+
+    struct dialog * dialog = (struct dialog *) MEM(DIALOG_MnCardFormatBegin);
+    if (dialog && !streq(dialog->type, "DIALOG"))
+        dialog = NULL;
+
+    char text[64];
+    for (int i = 0; i < FORMAT_DIALOG_ITEMS; i++)
+    {
+        uint32_t old_int = cli();
+        int dirty = format_dialog_dirty & (1u << i);
+        if (dirty)
+        {
+            memcpy(text, format_dialog_text[i], sizeof(text));
+            format_dialog_dirty &= ~(1u << i);
+        }
+        sei(old_int);
+
+        if (dirty && dialog)
+            dialog_set_property_str(dialog, i, text);
+    }
+
+    if (dialog)
+        dialog_refresh(dialog);
 }
+
+static void format_dialog_set_text(int item, const char * msg)
+{
+    if (item < 0 || item >= FORMAT_DIALOG_ITEMS)
+        return;
+
+    char text[64];
+    snprintf(text, sizeof(text), "%s", msg);
+
+    uint32_t old_int = cli();
+    memcpy(format_dialog_text[item], text, sizeof(text));
+    format_dialog_dirty |= 1u << item;
+    int schedule = !format_dialog_pending;
+    format_dialog_pending = 1;
+    sei(old_int);
+
+    /* one call at a time: CtrlSrv's timer pool is small */
+    if (schedule && (CtrlSrv_SetTimerAfter(10, format_dialog_text_cbr, format_dialog_text_cbr, 0) & 1))
+        format_dialog_pending = 0;
+}
+#endif
 
 static void HijackCurrentDialogBox(int string_id, char* msg)
 {
+#ifdef CONFIG_DIALOG_TEXT_IN_CTRLSRV
+    format_dialog_set_text(string_id, msg);
+#else
     struct gui_task * current = gui_task_list.current;
     struct dialog * dialog = current->priv;
     if (dialog && !streq(dialog->type, "DIALOG")) return;
     dialog_set_property_str(dialog, string_id, msg);
     dialog_redraw(dialog);
+#endif
 }
+
+static void HijackFormatDialogBox()
+{
+    if (MEM(DIALOG_MnCardFormatBegin) == 0) return;
+
+    if (keep_ml_after_format)
+        HijackCurrentDialogBox(4, "Format card, keep ML " FORMAT_BTN_NAME);
+    else
+        HijackCurrentDialogBox(4, "Format card, remove ML " FORMAT_BTN_NAME);
+}
+
+/* show keep / remove on the format dialog */
+static void format_dialog_update()
+{
+#ifdef CONFIG_DIALOG_TEXT_IN_CTRLSRV
+    HijackFormatDialogBox();    /* asynchronous, in CtrlSrv */
+#else
+    fake_simple_button(MLEV_HIJACK_FORMAT_DIALOG_BOX);
+#endif
+}
+
+/* restore progress: on the dialog if the cam has a text item for it,
+ * else in a NotifyBox (after the format no format dialog is left) */
+static void format_status(char * msg)
+{
+#ifdef FORMAT_STR_LOC
+    HijackCurrentDialogBox(FORMAT_STR_LOC, msg);
+#else
+    NotifyBox(3000, "%s", msg);
+#endif
+}
+
+/* set while ML's files are copied to RAM, before the format may start */
+static volatile int format_backup_running = 0;
 
 int handle_keep_ml_after_format_toggle(struct event * event)
 {
+#ifndef CONFIG_PROP_REQUEST_CHANGE
+    /* Without property writes gui_uilock() can't lock Canon's UI, so the
+     * format dialog's buttons are held back here, before Canon sees them,
+     * until the copy is done (ML's own events, < 0, still pass). */
+    if (format_backup_running && event->param >= 0 && MENU_MODE && MEM(DIALOG_MnCardFormatBegin))
+        return 0;
+#endif
+
     if (event->param == FORMAT_BTN && MENU_MODE && MEM(DIALOG_MnCardFormatBegin))
     {
         keep_ml_after_format = !keep_ml_after_format;
-        fake_simple_button(MLEV_HIJACK_FORMAT_DIALOG_BOX);
+        format_dialog_update();
         return 0;
     }
     
@@ -1774,87 +1871,95 @@ struct tmp_file {
 
 static struct tmp_file * tmp_files = 0;
 static int tmp_file_index = 0;
-static void* tmp_buffer = 0;
-static void* tmp_buffer_ptr = 0;
+static int tmp_size = 0;        /* bytes kept in RAM */
+static int tmp_skipped = 0;     /* files that could not be kept */
+#define TMP_MAX_FILES 200
+
+/* Most cams keep up to 15 MB of ML files; a cam whose memory for this is
+ * smaller sets CONFIG_RESTORE_AFTER_FORMAT_MAX_SIZE (internals.h). Each
+ * file has its own buffer, so no large contiguous block is needed. */
+#ifdef CONFIG_RESTORE_AFTER_FORMAT_MAX_SIZE
+#define TMP_MAX_BUF_SIZE CONFIG_RESTORE_AFTER_FORMAT_MAX_SIZE
+#else
 #define TMP_MAX_BUF_SIZE 15000000
+#endif
 
 static int TmpMem_Init()
 {
-    ASSERT(!tmp_buffer);
     ASSERT(!tmp_files);
-    static int retries = 0;
     tmp_file_index = 0;
-    if (!tmp_files) tmp_files = malloc(200 * sizeof(struct tmp_file));
+    tmp_size = 0;
+    tmp_skipped = 0;
+    if (!tmp_files) tmp_files = malloc(TMP_MAX_FILES * sizeof(struct tmp_file));
     if (!tmp_files)
     {
-        retries++;
-        HijackCurrentDialogBox(4,
-            retries > 2 ? "Restart your camera (malloc error)." :
-                          "Format: malloc error :("
-            );
+        HijackCurrentDialogBox(4, "Format: malloc error :(");
         beep();
         msleep(2000);
         return 0;
     }
-
-    if (!tmp_buffer) tmp_buffer = (void*)fio_malloc(TMP_MAX_BUF_SIZE);
-    if (!tmp_buffer)
-    {
-        retries++;
-        HijackCurrentDialogBox(4,
-            retries > 2 ? "Restart your camera (fio_malloc err)." :
-                          "Format: fio_malloc error, retrying..."
-        );
-        beep();
-        msleep(2000);
-        free(tmp_files); tmp_files = 0;
-        return 0;
-    }
-
-    retries = 0;
-    tmp_buffer_ptr = tmp_buffer;
-
     return 1;
 }
 
 static void TmpMem_Done()
 {
+    if (!tmp_files) return;
+    for (int i = 0; i < tmp_file_index; i++)
+        fio_free(tmp_files[i].buf);
+    tmp_file_index = 0;
     free(tmp_files); tmp_files = 0;
-    fio_free(tmp_buffer); tmp_buffer = 0;
 }
 
 static void TmpMem_UpdateSizeDisplay(int counting)
 {
-    int size = tmp_buffer_ptr - tmp_buffer;
-    int size_mb = size * 10 / 1024 / 1024;
+    int size_mb = tmp_size * 10 / 1024 / 1024;
 
     char msg[100];
-    snprintf(msg, sizeof(msg), "Format       (ML size: %s%d.%d MB%s)", counting ? "> " : "", size_mb/10, size_mb%10, counting ? "..." : "");
+    if (tmp_skipped && !counting)
+        snprintf(msg, sizeof(msg), "ML size: %d.%d MB, %d file%s not kept", size_mb/10, size_mb%10, tmp_skipped, tmp_skipped == 1 ? "" : "s");
+    else
+        snprintf(msg, sizeof(msg), "Format       (ML size: %s%d.%d MB%s)", counting ? "> " : "", size_mb/10, size_mb%10, counting ? "..." : "");
     HijackCurrentDialogBox(3, msg);
 }
 
 static void TmpMem_AddFile(char* filename)
 {
-    if (!tmp_buffer) return;
-    if (!tmp_buffer_ptr) return;
+    if (!tmp_files) return;
 
     int filesize = FIO_GetFileSize_direct(filename);
     if (filesize == -1) return;
-    if (tmp_file_index >= 200) return;
-    if (tmp_buffer_ptr + filesize + 10 >= tmp_buffer + TMP_MAX_BUF_SIZE) return;
-    
+
     /* don't add the same file twice */
     for (int i = 0; i < tmp_file_index; i++)
         if (streq(tmp_files[i].name, filename))
             return;
 
-    read_file(filename, tmp_buffer_ptr, filesize);
-    snprintf(tmp_files[tmp_file_index].name, 50, "%s", filename);
-    tmp_files[tmp_file_index].buf = tmp_buffer_ptr;
+    if (tmp_file_index >= TMP_MAX_FILES || strlen(filename) >= sizeof(tmp_files[0].name)
+        || tmp_size + filesize > TMP_MAX_BUF_SIZE)
+    {
+        tmp_skipped++;
+        return;
+    }
+
+    void * buf = fio_malloc(MAX(filesize, 4));
+    if (!buf)
+    {
+        tmp_skipped++;
+        return;
+    }
+    if ((int) read_file(filename, buf, filesize) != filesize)
+    {
+        fio_free(buf);
+        tmp_skipped++;
+        return;
+    }
+
+    snprintf(tmp_files[tmp_file_index].name, sizeof(tmp_files[0].name), "%s", filename);
+    tmp_files[tmp_file_index].buf = buf;
     tmp_files[tmp_file_index].size = filesize;
-    tmp_files[tmp_file_index].sig = compute_signature(tmp_buffer_ptr, filesize/4);
+    tmp_files[tmp_file_index].sig = compute_signature(buf, filesize/4);
     tmp_file_index++;
-    tmp_buffer_ptr += ALIGN32SUP(filesize);
+    tmp_size += filesize;
 
     /* no not update on every file, else it takes too long (90% of time updating display) */
     static int aux = 0;
@@ -1862,7 +1967,7 @@ static void TmpMem_AddFile(char* filename)
     {
         char msg[100];
 
-        snprintf(msg, sizeof(msg), "Reading %s...", filename, tmp_buffer_ptr);
+        snprintf(msg, sizeof(msg), "Reading %s...", filename);
         HijackCurrentDialogBox(4, msg);
         TmpMem_UpdateSizeDisplay(1);
     }
@@ -1952,6 +2057,17 @@ static int check_autoexec()
     return is_file("AUTOEXEC.BIN");
 }
 
+/* writes a kept file back; 1 if the card holds it with the right size */
+static int TmpMem_RestoreFile(struct tmp_file * f)
+{
+    /* the RAM copy must still be the one that was read */
+    if ((int) compute_signature(f->buf, f->size/4) != f->sig)
+        return 0;
+
+    save_mem_to_file(f->buf, f->size, f->name);
+    return (int) FIO_GetFileSize_direct(f->name) == f->size;
+}
+
 static void CopyMLFilesBack_AfterFormat()
 {
     int i;
@@ -1962,14 +2078,23 @@ static void CopyMLFilesBack_AfterFormat()
         if(should_run_polling_action(500, &aux))
         {
             snprintf(msg, sizeof(msg), "Restoring %s...", tmp_files[i].name);
-            HijackCurrentDialogBox(FORMAT_STR_LOC, msg);
+            format_status(msg);
         }
-        save_mem_to_file(tmp_files[i].buf, tmp_files[i].size, tmp_files[i].name);
-        int sig = compute_signature(tmp_files[i].buf, tmp_files[i].size/4);
-        if (sig != tmp_files[i].sig)
+
+        int ok = TmpMem_RestoreFile(&tmp_files[i]);
+
+        /* the card may be mounted again only some time after the format
+         * dialog closed: give the first file up to 10 s */
+        for (int t = 0; !ok && i == 0 && t < 20; t++)
+        {
+            msleep(500);
+            ok = TmpMem_RestoreFile(&tmp_files[i]);
+        }
+
+        if (!ok)
         {
             snprintf(msg, sizeof(msg), "Could not restore %s :(", tmp_files[i].name);
-            HijackCurrentDialogBox(FORMAT_STR_LOC, msg);
+            format_status(msg);
             msleep(2000);
             FIO_RemoveFile(tmp_files[i].name);
             if (i <= 1) return;
@@ -1980,24 +2105,25 @@ static void CopyMLFilesBack_AfterFormat()
     /* make sure we don't enable bootflag when there is no autoexec.bin (anymore) */
     if(check_autoexec())
     {
-        HijackCurrentDialogBox(FORMAT_STR_LOC, "Writing bootflags...");
-        
+        format_status("Writing bootflags...");
+
         extern int bootflag_write_bootblock(void);
         if (!bootflag_write_bootblock())
         {
             beep_times(3);
             NotifyBox(5000, "Bootflags not written, use EosCard");
+            msleep(5000);
         }
     }
 
-    HijackCurrentDialogBox(FORMAT_STR_LOC, "Magic Lantern restored :)");
+    format_status("Magic Lantern restored :)");
     msleep(2000);
 }
 
 static void restart_after_format()
 {
     /* restart the camera after formatting */
-    HijackCurrentDialogBox(FORMAT_STR_LOC, "Restarting camera...");
+    format_status("Restarting camera...");
     msleep(1000);
     
     int reboot = 0;
@@ -2010,11 +2136,14 @@ static void HijackFormatDialogBox_main()
     if (MEM(DIALOG_MnCardFormatBegin) == 0) return;
     // at this point, Format dialog box is active
     
-    #ifdef CONFIG_DUAL_SLOT
+    #if defined(CONFIG_DUAL_SLOT) || defined(FORMATTING_CF_CARD)
     int ml_on_cf = (get_ml_card()->drive_letter[0] == 'A');
     if (ml_on_cf != FORMATTING_CF_CARD)
     {
         /* we are not formatting the ML card, no need to restore anything */
+        /* wait for this dialog to close, or we would check it again and again */
+        while (MEM(DIALOG_MnCardFormatBegin))
+            msleep(200);
         return;
     }
     #endif
@@ -2022,17 +2151,31 @@ static void HijackFormatDialogBox_main()
     // make sure we have something to restore :)
     if (!check_autoexec()) return;
 
+    format_backup_running = 1;
     gui_uilock(UILOCK_EVERYTHING);
-    
-    while (!TmpMem_Init())  /* may fail because of not enough memory */
-        msleep(100);
+
+    int ready = 0;
+    for (int tries = 0; tries < 3 && !ready; tries++)
+        ready = TmpMem_Init();  /* may fail because of not enough memory */
+
+    if (!ready)
+    {
+        /* give up on this dialog: the format will remove ML */
+        gui_uilock(UILOCK_NONE);
+        format_backup_running = 0;
+        HijackCurrentDialogBox(4, "Format card, ML not kept (no memory)");
+        while (MEM(DIALOG_MnCardFormatBegin))
+            msleep(200);
+        return;
+    }
 
     // before user attempts to do something, copy ML files to RAM
     CopyMLFilesToRAM_BeforeFormat();
     gui_uilock(UILOCK_NONE);
+    format_backup_running = 0;
 
     // all files copied, we can change the message in the format box and let the user know what's going on
-    fake_simple_button(MLEV_HIJACK_FORMAT_DIALOG_BOX);
+    format_dialog_update();
 
     // waiting to exit the format dialog somehow
     while (MEM(DIALOG_MnCardFormatBegin))

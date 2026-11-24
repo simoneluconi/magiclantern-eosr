@@ -673,6 +673,12 @@ char* get_info_button_name() { return INFO_BTN_NAME; }
 
 void gui_uilock(int what)
 {
+#ifndef CONFIG_PROP_REQUEST_CHANGE
+    /* PROP_ICU_UILOCK can't be sent without property writes: don't wait
+     * 2 s for an answer that never comes. Callers that must keep Canon's
+     * UI from acting meanwhile hold back the events themselves. */
+    return;
+#endif
     int old = icu_uilock;
 
     if ((icu_uilock & 0xFFFF) != UILOCK_NONE && what != UILOCK_NONE)
