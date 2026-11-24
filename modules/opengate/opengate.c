@@ -656,14 +656,21 @@ static void og_handle_lost_locked(void)
     og_removed_notice = 1;
 }
 
-/* from a property handler (task context): remove at once if possible. keep: the open-gate
- * setting stays known (another movie setting changed), the next safe point re-applies */
-static void og_lost(const char * why, int keep)
+/* records a lost setting: the worker (og_lock held) removes in this step or the next.
+ * keep: the open-gate setting stays known (another movie setting changed), the next safe
+ * point re-applies */
+static void og_lost_note(const char * why, int keep)
 {
     if (!keep) og_setting_col = 0;
     og_lost_keep = keep && !og_lost_pending;
     og_lost_why = why;
     og_lost_pending = 1;
+}
+
+/* from a property handler (task context): remove at once if possible */
+static void og_lost(const char * why, int keep)
+{
+    og_lost_note(why, keep);
     if (RECORDING) return;                          /* the worker removes after the stop */
     if (take_semaphore(og_lock, 1000) != 0) return; /* the worker removes on its next step */
     og_handle_lost_locked();
@@ -679,10 +686,12 @@ static void og_setting_lost(const char * why)
  * delivered by an ML core with CONFIG_PROP_MOVIE_CONTROL_PARAM, R6 has no PROP_VIDEO_MODE).
  * With an older core neither arrives and only the live checks remain. */
 /* only what decides: byte 0x30 (0 NTSC / 1 PAL rates, 2 = 24.00p) is not kept, 24.00p has
- * its own exact rate (2400, not supported); Canon re-posts the same values at every
- * photo / movie switch, which must not count as a change */
+ * its own exact rate (2400, not supported); Canon re-posts at every photo / movie switch,
+ * which must not count as a change. Leaving the movie LV posts the photo LV setting, not
+ * the movie one: 29.97p with any NTSC movie rate (camera log, 4K 23.98p), so og_mcp is
+ * only taken from the postings of the movie setting (og_decide_posting) */
 struct og_mcp { uint32_t fps100, size, readout; };
-static struct og_mcp og_mcp;            /* last posted */
+static struct og_mcp og_mcp;            /* the movie setting */
 static volatile int og_mcp_calls;
 static volatile int og_crop;            /* movie crop on */
 static volatile int og_setting_changes; /* counts posted changes of the setting */
@@ -729,21 +738,46 @@ static void og_event(uint32_t prop, uint32_t a, uint32_t b, uint32_t c, uint32_t
     og_ev_w++;
 }
 
-/* the whole last posting: any change other than the frame rate (words 0 and 1, byte 0x30
- * PAL / NTSC) is a new recording setup for Canon (codec, bit depth, GOP, quality...).
- * Switching Canon Log on (H.264 8-bit -> HEVC 10-bit) with the patches ACTIVE gave Err 70
- * (camera log): such a change removes the patches, and the next safe point re-applies */
+/* the whole posting of the movie setting: any change other than the frame rate (words 0
+ * and 1, byte 0x30 PAL / NTSC) is a new recording setup for Canon (codec, bit depth, GOP,
+ * quality...). Switching Canon Log on (H.264 8-bit -> HEVC 10-bit) with the patches ACTIVE
+ * gave Err 70 (camera log): such a change removes the patches, and the next safe point
+ * re-applies */
 static uint8_t og_mcp_raw[PROP_MOVIE_CONTROL_PARAM_LEN];
 static int og_mcp_raw_ok;
-static volatile int og_crop_posts;      /* PROP_MOVIE_CROP_MODE postings */
-static volatile int og_other_since;     /* time of an "other" change still to decide, 0 none */
-static volatile int og_other_crop_posts;
-/* camera logs: the crop posting follows within 20-50 ms; the Err 70 of a change kept under
- * the patches came seconds later, at record start. A switch whose crop posting does not
- * come in time only costs a removal (the safe side) */
-#define OG_OTHER_WAIT_MS 500
 #define OG_MCP_FPS_LO  0x000000FFu      /* bytes 0-7: w0, w1 */
 #define OG_MCP_FPS_HI  (1u << (0x30 - 32))
+
+/* the photo LV posting seen with the current movie setting (a boot in photo mode may give
+ * the core only this one) */
+static struct og_mcp og_photo_mcp;
+static volatile int og_photo_ok;
+
+/* the last posting, decided by the worker: a photo / movie switch posts it and then, 20-50
+ * ms later (camera logs), PROP_MOVIE_CROP_MODE; a menu change posts it alone. The handler
+ * writes it between two increments of og_pend_seq (odd while writing) */
+static struct og_mcp og_pend;
+static uint8_t og_pend_raw[PROP_MOVIE_CONTROL_PARAM_LEN];
+static volatile int og_pend_since;      /* time of a posting still to decide, 0 none */
+static volatile int og_pend_path;       /* Canon's LV path when it came: the mode being left */
+static volatile int og_pend_switch;     /* PROP_MOVIE_CROP_MODE followed: photo / movie switch */
+static volatile int og_pend_seq;
+/* the Err 70 of a change kept under the patches came seconds later, at record start, and
+ * Canon restarts the LV about 2 s after the posting. A switch whose crop posting does not
+ * come in time only costs a removal (the safe side) */
+#define OG_PEND_WAIT_MS 500
+
+/* bytes of a posting that differ from the movie setting, other than the frame rate */
+static int og_mcp_other(const uint8_t * b, uint32_t * dlo_out, uint32_t * dhi_out)
+{
+    uint32_t dlo = 0, dhi = 0;
+    if (og_mcp_raw_ok)
+        for (int i = 0; i < PROP_MOVIE_CONTROL_PARAM_LEN; i++)
+            if (b[i] != og_mcp_raw[i]) { if (i < 32) dlo |= 1u << i; else dhi |= 1u << (i - 32); }
+    if (dlo_out) *dlo_out = dlo;
+    if (dhi_out) *dhi_out = dhi;
+    return (dlo & ~OG_MCP_FPS_LO) || (dhi & ~OG_MCP_FPS_HI);
+}
 
 PROP_HANDLER(PROP_MOVIE_CONTROL_PARAM)
 {
@@ -752,33 +786,20 @@ PROP_HANDLER(PROP_MOVIE_CONTROL_PARAM)
     {
         const uint8_t * b = (const uint8_t *) buf;
         struct og_mcp m = { buf[1], b[8], b[0x2C] };
-        uint32_t dlo = 0, dhi = 0;              /* bytes that differ from the last posting */
-        if (og_mcp_raw_ok)
-            for (int i = 0; i < PROP_MOVIE_CONTROL_PARAM_LEN; i++)
-                if (b[i] != og_mcp_raw[i]) { if (i < 32) dlo |= 1u << i; else dhi |= 1u << (i - 32); }
-        memcpy(og_mcp_raw, b, PROP_MOVIE_CONTROL_PARAM_LEN);
-        og_mcp_raw_ok = 1;
+        uint32_t dlo, dhi;
+        og_mcp_other(b, &dlo, &dhi);
         og_event(PROP_MOVIE_CONTROL_PARAM, m.fps100, m.size, m.readout, b[0x30], dlo, dhi);
-        int changed = !og_mcp_calls || memcmp(&m, &og_mcp, sizeof(m)) != 0;
-        int other = (dlo & ~OG_MCP_FPS_LO) || (dhi & ~OG_MCP_FPS_HI);
-        og_mcp = m;
-        og_mcp_calls++;
-        const char * why = 0;
-        if (changed)
-        {
-            og_setting_changes++;
-            /* a supported rate alone stays applied: all three columns are patched, and
-             * the live check follows the live one */
-            if (!og_mcp_col(&m, &why)) og_setting_lost(why);
-        }
-        /* decided by the worker: a photo / movie switch posts this and then, about 20 ms
-         * later, PROP_MOVIE_CROP_MODE, and the photo LV posting carries other values than
-         * the movie one (Canon Log is movie only); a menu change posts this alone */
-        if (other && !why && og_removal_needed())
-        {
-            og_other_crop_posts = og_crop_posts;
-            og_other_since = get_ms_clock() | 1;
-        }
+        og_pend_seq++;
+        og_pend = m;
+        memcpy(og_pend_raw, b, PROP_MOVIE_CONTROL_PARAM_LEN);
+        og_pend_path = og_path();
+        og_pend_switch = 0;
+        og_pend_since = get_ms_clock() | 1;
+        og_pend_seq++;
+        /* not supported: the patches go now, before Canon restarts the LV. The setting
+         * stays known until the posting is decided (the photo LV one is not the setting) */
+        const char * why;
+        if (!og_mcp_col(&m, &why) && og_removal_needed()) og_lost(why, 1);
     }
     og_in_handler = 0;
 }
@@ -787,7 +808,7 @@ PROP_HANDLER(PROP_MOVIE_CROP_MODE)
 {
     og_in_handler = 1;
     og_event(PROP_MOVIE_CROP_MODE, buf[0], 0, 0, 0, 0, 0);
-    og_crop_posts++;
+    if (og_pend_since) og_pend_switch = 1;
     int c = buf[0] != 0;
     if (c != og_crop) og_setting_changes++;
     og_crop = c;
@@ -824,20 +845,32 @@ static CONFIG_INT("opengate.vm0", og_saved_vm0, 0);
 static CONFIG_INT("opengate.vm1", og_saved_vm1, 0);
 static CONFIG_INT("opengate.vm2", og_saved_vm2, 0);
 static CONFIG_INT("opengate.vm.ok", og_saved_vm_ok, 0);
+/* the photo LV posting seen with it (pvm0-2 as vm0-2) */
+static CONFIG_INT("opengate.pvm0", og_saved_pvm0, 0);
+static CONFIG_INT("opengate.pvm1", og_saved_pvm1, 0);
+static CONFIG_INT("opengate.pvm2", og_saved_pvm2, 0);
+static CONFIG_INT("opengate.pvm.ok", og_saved_pvm_ok, 0);
 
 /* written only when something changes (the config is saved at power off) */
 static void og_save_setting(int col)
 {
-    struct og_mcp m = og_mcp;
+    struct og_mcp m = og_mcp, p = og_photo_mcp;
     int ok = col && og_mcp_calls > 0;
     int vm0 = ok ? (int) m.fps100 : 0, vm1 = ok ? (int) m.size : 0, vm2 = ok ? (int) m.readout : 0;
-    if (og_saved_col == col && og_saved_vm_ok == ok && og_saved_vm0 == vm0 && og_saved_vm1 == vm1 && og_saved_vm2 == vm2)
+    int pok = ok && og_photo_ok;
+    int pvm0 = pok ? (int) p.fps100 : 0, pvm1 = pok ? (int) p.size : 0, pvm2 = pok ? (int) p.readout : 0;
+    if (og_saved_col == col && og_saved_vm_ok == ok && og_saved_vm0 == vm0 && og_saved_vm1 == vm1 && og_saved_vm2 == vm2
+        && og_saved_pvm_ok == pok && og_saved_pvm0 == pvm0 && og_saved_pvm1 == pvm1 && og_saved_pvm2 == pvm2)
         return;
     og_saved_col = col;
     og_saved_vm_ok = ok;
     og_saved_vm0 = vm0;
     og_saved_vm1 = vm1;
     og_saved_vm2 = vm2;
+    og_saved_pvm_ok = pok;
+    og_saved_pvm0 = pvm0;
+    og_saved_pvm1 = pvm1;
+    og_saved_pvm2 = pvm2;
 }
 
 /* learn the setting from Canon's own (unpatched) movie LV. A sample counts only when the
@@ -908,8 +941,21 @@ static void og_recall_setting(void)
     struct og_mcp m = og_mcp;
     int same = og_saved_vm_ok && og_saved_vm0 == (int) m.fps100
             && og_saved_vm1 == (int) m.size && og_saved_vm2 == (int) m.readout;
-    og_log("last session: 4K %s, movie setting %s", r->name, same ? "same: reused" : "different: not reused");
-    if (!same || !og_prop_ok(r->col)) return;
+    /* a boot in photo mode: the core may hold the photo LV posting (29.97p with an NTSC
+     * movie rate). Then the movie setting is the saved one; the movie posting before the LV
+     * restarts corrects it, and all three columns are patched */
+    int photo = !same && og_saved_vm_ok && og_saved_pvm_ok && og_saved_pvm0 == (int) m.fps100
+            && og_saved_pvm1 == (int) m.size && og_saved_pvm2 == (int) m.readout;
+    og_log("last session: 4K %s, movie setting %s", r->name,
+           same ? "same: reused" : photo ? "same photo LV posting: reused" : "different: not reused");
+    if (!same && !photo) return;
+    if (photo) og_mcp = (struct og_mcp) { og_saved_vm0, og_saved_vm1, og_saved_vm2 };
+    if (og_saved_pvm_ok && !og_photo_ok)
+    {
+        og_photo_mcp = (struct og_mcp) { og_saved_pvm0, og_saved_pvm1, og_saved_pvm2 };
+        og_photo_ok = 1;
+    }
+    if (!og_prop_ok(r->col)) return;
     og_setting_col = r->col;
     og_setting_seq = og_setting_changes;
 }
@@ -994,30 +1040,58 @@ static void og_debug_step(void)
     }
 }
 
-/* an "other" change of the recording setup (PROP_MOVIE_CONTROL_PARAM handler): a menu
- * change if no PROP_MOVIE_CROP_MODE posting followed within OG_OTHER_WAIT_MS */
-static void og_decide_other(void)
+/* the last PROP_MOVIE_CONTROL_PARAM posting (handler above), once the crop posting came or
+ * OG_PEND_WAIT_MS passed: leaving the movie LV posts the photo LV setting, kept apart;
+ * entering it and a menu change post the movie setting */
+static void og_decide_posting(void)
 {
-    int since = og_other_since;
-    if (!since) return;
-    if (og_crop_posts != og_other_crop_posts)
+    int since = og_pend_since, seq = og_pend_seq;
+    if (!since || (seq & 1)) return;
+    int switched = og_pend_switch;
+    if (!switched && get_ms_clock() - since < OG_PEND_WAIT_MS) return;
+    struct og_mcp m = og_pend;
+    int path = og_pend_path;
+    uint8_t raw[PROP_MOVIE_CONTROL_PARAM_LEN];
+    memcpy(raw, og_pend_raw, PROP_MOVIE_CONTROL_PARAM_LEN);
+    if (og_pend_seq != seq) return;     /* a new posting came while reading */
+    og_pend_since = 0;
+
+    if (switched && path == OG_PATH_MOVIE)
     {
-        og_other_since = 0;
-        og_log("recording setup differs with a photo / movie switch: kept");
+        if (!og_photo_ok || memcmp(&m, &og_photo_mcp, sizeof(m)) != 0)
+            og_log("photo LV posting: fps %d size %d readout %d (not the movie setting)",
+                   m.fps100, m.size, m.readout);
+        og_photo_mcp = m;
+        og_photo_ok = 1;
+        if (og_setting_col) og_save_setting(og_setting_col);
         return;
     }
-    if (get_ms_clock() - since < OG_OTHER_WAIT_MS) return;
-    og_other_since = 0;
-    if (!og_removal_needed()) return;
-    og_lost_keep = !og_lost_pending;
-    og_lost_why = "Movie recording settings changed";
-    og_lost_pending = 1;        /* removed below by og_handle_lost_locked */
+
+    int other = og_mcp_other(raw, 0, 0);
+    int changed = !og_mcp_calls || memcmp(&m, &og_mcp, sizeof(m)) != 0;
+    og_mcp = m;
+    memcpy(og_mcp_raw, raw, PROP_MOVIE_CONTROL_PARAM_LEN);
+    og_mcp_raw_ok = 1;
+    og_mcp_calls++;
+    const char * why = 0;
+    if (changed)
+    {
+        og_setting_changes++;
+        og_photo_ok = 0;
+        og_log("movie setting: fps %d size %d readout %d", m.fps100, m.size, m.readout);
+        /* a supported rate alone stays applied: all three columns are patched, and the
+         * live check follows the live one */
+        if (!og_mcp_col(&m, &why)) og_lost_note(why, 0);
+    }
+    if (!other || why) return;
+    if (switched) { og_log("recording setup differs with a photo / movie switch: kept"); return; }
+    if (og_removal_needed()) og_lost_note("Movie recording settings changed", 1);
 }
 
 static void og_step(void)
 {
     og_debug_step();
-    og_decide_other();
+    og_decide_posting();
     if (og_ready_shown)
     {
         if (get_ms_clock() - og_ready_shown >= OG_READY_MS) og_ready_shown = 0;
@@ -1049,6 +1123,7 @@ static void og_step(void)
                     og_pending_deferred ? "deferred restore" : og_hdmi ? "HDMI" :
                     og_fps24_in() ? "fps24 module on" :
                     !lv ? "no LV" : !og_safe_point() ? "not a safe point" :
+                    og_pend_since ? "setting posted" :
                     !r ? "setting unknown" : og_setting_seq != og_setting_changes ? "setting changed" :
                     !og_prop_ok(col) ? "movie setting" : 0;
                 static const char * logged_wait;
