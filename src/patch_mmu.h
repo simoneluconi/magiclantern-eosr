@@ -46,7 +46,7 @@ int apply_normal_patches(void);
 // Grows the pool of remappable pages by what these patches still need (ROM
 // pages not remapped yet, sections without an L2 table yet), for cams with
 // CONFIG_MMU_RUNTIME_PAGES_MAX (src/patch_mmu.c). Call before apply_patches();
-// task context only; all or nothing; never freed.
+// task context only; allocates in small blocks; never freed.
 int mmu_reserve_pages_for_patches(const struct patch *patches, uint32_t count);
 
 // Sets up structures required for remapping via MMU,

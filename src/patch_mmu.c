@@ -63,6 +63,19 @@
 static uint8_t *runtime_pages[MMU_RUNTIME_PAGES_MAX];
 #endif
 
+// CONFIG_MMU_RUNTIME_PAGES_PER_BLOCK: mmu_reserve_pages_for_patches() takes
+// at most this many pages per AllocateMemory block. Canon's pool can be too
+// fragmented for a large block: on R6 a ~710 kB one failed once while
+// 4-page steps worked.
+#ifdef CONFIG_MMU_RUNTIME_PAGES_PER_BLOCK
+#define MMU_RUNTIME_PAGES_PER_BLOCK CONFIG_MMU_RUNTIME_PAGES_PER_BLOCK
+#else
+#define MMU_RUNTIME_PAGES_PER_BLOCK 4
+#endif
+#if MMU_RUNTIME_PAGES_PER_BLOCK < 1
+#error "CONFIG_MMU_RUNTIME_PAGES_PER_BLOCK must be at least 1"
+#endif
+
 #if !defined(PTR_ALLOC_MEM_START)
 // If AllocMem start is defined, we assume MMU tables should be located there.
 // Otherwise we reserve space in magiclantern.bin for CONFIG_MMU_REMAP_PAGES
@@ -703,11 +716,13 @@ static struct mmu_L2_page_info *L2_for_section(uint32_t addr)
 // (unpatching keeps them mapped, with the ROM bytes back in the RAM copy),
 // and free boot or runtime pages and tables count, so a feature asks for its
 // own patches only, whatever else was enabled before in this boot. Adds only
-// what is missing, in one AllocateMemory block (mmu_add_runtime_pages); the
-// memory is never freed. Calling it again for patches already applied once
-// adds nothing, so a feature can call it each time it is enabled, before
-// apply_patches(). Task context only. Returns 0, or a negative value if
-// nothing was added.
+// what is missing (mmu_add_runtime_pages), in AllocateMemory blocks of at
+// most MMU_RUNTIME_PAGES_PER_BLOCK pages; the memory is never freed. Calling
+// it again for patches already applied once adds nothing, so a feature can
+// call it each time it is enabled, before apply_patches(). Task context only.
+// Returns 0, or a negative value if the pool still lacks pages: if one
+// allocation fails, the blocks added before it stay in the pool and the
+// next call counts them.
 int mmu_reserve_pages_for_patches(const struct patch *patches, uint32_t count)
 {
     if (!mmu_globals_initialised)
@@ -756,7 +771,26 @@ int mmu_reserve_pages_for_patches(const struct patch *patches, uint32_t count)
 
     uint32_t n_pages = new_pages > free_pages ? new_pages - free_pages : 0;
     uint32_t n_L2 = new_sections > free_tables ? new_sections - free_tables : 0;
-    return mmu_add_runtime_pages(n_pages, n_L2);
+
+    // refuse up front what can never fit, so that only an allocation can
+    // fail below
+    if (global_mmu_conf.runtime_64k_pages + n_pages > MMU_RUNTIME_PAGES_MAX
+        || free_runtime_L2_tables() < n_L2)
+        return -5;
+
+    // in blocks of at most MMU_RUNTIME_PAGES_PER_BLOCK pages, the L2
+    // tables with the first one
+    while (n_pages || n_L2)
+    {
+        uint32_t n = n_pages < MMU_RUNTIME_PAGES_PER_BLOCK ? n_pages
+                                                           : MMU_RUNTIME_PAGES_PER_BLOCK;
+        int err = mmu_add_runtime_pages(n, n_L2);
+        if (err)
+            return err;
+        n_pages -= n;
+        n_L2 = 0;
+    }
+    return 0;
 }
 #endif
 
