@@ -230,6 +230,71 @@ static void f24_remove(int from, int to)
 }
 
 /* ------------------------------------------------------------------------
+ * debug dump (menu "Debug dump", off by default): while 24.00p is live, Canon's own
+ * DryosDebugMsg RAM ring (S = *0x52A8, "KUWA" handles at S+0x10/0x14/0x18; PLAYER-2736.md
+ * 9) goes to ML/LOGS/F24DM0.BIN / F24DM1.BIN alternately every 2 s, in the OGDM format
+ * that player/dmring.py decodes. Camera: REC at 24.00p leaves Canon "BUSY" for good with
+ * the camera alive, so the ring shows what the record start waits for. No patch.
+ * ------------------------------------------------------------------------ */
+
+static CONFIG_INT("fps24.debug", f24_debug, 0);
+
+#define F24_DM_PTR    0x52A8
+#define F24_DM_S_LEN  0x348
+#define F24_DM_MAGIC  0x4157554B
+#define F24_DM_SLOT   0x54
+
+static uint32_t f24_dm_ring(uint32_t s, int k, uint32_t * len)
+{
+    uint32_t h = f24_rd(s + 0x10 + 4 * k);
+    if (!f24_ram_ok(h, 0x80) || f24_rd(h) != F24_DM_MAGIC) return 0;
+    uint32_t n = 0;
+    for (int sub = 0; sub < 2; sub++)
+    {
+        uint32_t off = f24_rd(h + 4 * (2 + 15 * sub)), cnt = f24_rd(h + 4 * (4 + 15 * sub));
+        if (off < 0x80 || off > 0x100000 || cnt > 0x4000) return 0;
+        n = MAX(n, off + cnt * F24_DM_SLOT);
+    }
+    if (!f24_ram_ok(h, n)) return 0;
+    *len = n;
+    return h;
+}
+
+static void f24_dm_dump(const char * name)
+{
+    uint32_t s = f24_rd(F24_DM_PTR);
+    if (!f24_ram_ok(s, F24_DM_S_LEN) || !f24_rd(s + 0x0C)) return;
+    uint32_t h[3], n[3], nb = 1;
+    for (int k = 0; k < 3; k++) { h[k] = f24_dm_ring(s, k, &n[k]); if (h[k]) nb++; }
+    FILE * f = FIO_CreateFile(name);
+    if (!f) return;
+    uint32_t hdr[4] = { 0x4D44474F, 1, s, nb };    /* "OGDM", version, S, blocks */
+    FIO_WriteFile(f, hdr, sizeof(hdr));
+    uint32_t b[2] = { s, F24_DM_S_LEN };
+    FIO_WriteFile(f, b, sizeof(b));
+    FIO_WriteFile(f, (void *) s, F24_DM_S_LEN);     /* FIO_WriteFile flushes and uses the uncached alias */
+    for (int k = 0; k < 3; k++)
+    {
+        if (!h[k]) continue;
+        b[0] = h[k]; b[1] = n[k];
+        FIO_WriteFile(f, b, sizeof(b));
+        FIO_WriteFile(f, (void *) h[k], n[k]);
+    }
+    FIO_CloseFile(f);
+}
+
+static void f24_dm_step(void)
+{
+    static int last, file;
+    if (!f24_debug || !f24_live() || ml_shutdown_requested) return;
+    int now = get_ms_clock();
+    if (now - last < 2000) return;
+    last = now;
+    f24_dm_dump(file ? "ML/LOGS/F24DM1.BIN" : "ML/LOGS/F24DM0.BIN");
+    file ^= 1;
+}
+
+/* ------------------------------------------------------------------------
  * task
  * ------------------------------------------------------------------------ */
 
@@ -251,6 +316,7 @@ static void f24_task(void * unused)
     {
         msleep(200);
         if (ml_shutdown_requested) break;
+        f24_dm_step();                          /* also while recording / BUSY */
         if (!f24_can_change()) continue;
 
         if (f24_ui && !f24_all_in())
@@ -317,6 +383,15 @@ static struct menu_entry f24_menu[] =
         .update = f24_update,
         .help   = "Canon's 24.00p row in Movie rec. quality; Enable records 4K UHD 23.98p as 24.00p.",
         .help2  = "4K 23.98p (NTSC) only, FHD stays 23.98p. Untested sensor sync. Not with open gate.",
+        .children = (struct menu_entry[]) {
+            {
+                .name   = "Debug dump",
+                .priv   = &f24_debug,
+                .max    = 1,
+                .help   = "While 24.00p is live: Canon's debug ring to ML/LOGS/F24DM0/1.BIN every 2 s.",
+            },
+            MENU_EOL,
+        },
     },
 };
 
@@ -351,4 +426,5 @@ MODULE_INFO_END()
 
 MODULE_CONFIGS_START()
     MODULE_CONFIG(f24_ui)
+    MODULE_CONFIG(f24_debug)
 MODULE_CONFIGS_END()
