@@ -37,7 +37,7 @@
 #include "fps24_r6_190.h"
 
 /* src/patch_mmu.c (not declared in patch.h for modules) */
-extern int mmu_reserve_runtime_pages(uint32_t total_pages, uint32_t total_L2_tables);
+extern int mmu_reserve_pages_for_patches(const struct patch * patches, uint32_t count);
 
 #define RD16(a) (*(volatile uint16_t *)(a))
 #define RD32(a) (*(volatile uint32_t *)(a))
@@ -206,13 +206,19 @@ static int f24_apply(void)
     /* the timing cells first: unused until fps index 9, so harmless if the patches fail */
     if (!f24_fill_cells()) return 0;
 
-    /* adds nothing if the pool is already this big (then its pages may be taken) */
-    if (mmu_reserve_runtime_pages(F24_PAGES, F24_L2)) { f24_why = "Not enough memory for the patches"; return 0; }
+    /* runtime MMU pages for what these patches still need, plus P6's page (applied later,
+     * while 24.00p is live); pages remapped before, by us or another feature, are reused */
+    struct patch p6 = { .addr = (uint8_t *) f24_p6[0].addr, .size = 4 };
+    if (mmu_reserve_pages_for_patches(p, np) || mmu_reserve_pages_for_patches(&p6, 1))
+    {
+        f24_why = "Not enough memory for the patches";
+        return 0;
+    }
     int e = apply_patches(p, np);               /* copies the arrays; all or nothing */
     if (e)
     {
         f24_why = e & E_PATCH_TOO_MANY_PATCHES ? "Too many ML patches active"
-                : e & E_PATCH_BAD_MMU_PAGE ? "No MMU page left (reboot if open gate was on)"
+                : e & E_PATCH_BAD_MMU_PAGE ? "No MMU page left"
                 : e & E_PATCH_OLD_VALUE_MISMATCH ? "ROM not stock (other firmware or patch?)"
                 : "ROM patch refused";
         printf("fps24: apply_patches %x\n", e);
@@ -254,6 +260,7 @@ static void f24_p6_step(void)
     struct patch p = { .addr = (uint8_t *) f24_p6[0].addr, .old_values = (uint8_t *) f24_p6_buf[0],
                        .new_values = (uint8_t *) f24_p6_buf[1], .size = 4 * COUNT(f24_p6),
                        .is_instruction = 1, .description = f24_p6[0].what };
+    if (mmu_reserve_pages_for_patches(&p, 1)) { printf("fps24: P6: no MMU page\n"); return; }
     int e = apply_patches(&p, 1);
     if (e) { printf("fps24: P6 apply %x\n", e); return; }
     f24_p6_in = 1;

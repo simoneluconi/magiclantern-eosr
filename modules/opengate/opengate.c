@@ -35,8 +35,9 @@
 
 #include "og_r6_190.h"
 
-/* src/patch_mmu.c (not declared in patch.h for modules) */
-extern int mmu_reserve_runtime_pages(uint32_t total_pages, uint32_t total_L2_tables);
+/* src/patch_mmu.h (not included by patch.h for modules) */
+extern int mmu_reserve_pages_for_patches(const struct patch * patches, uint32_t count);
+#define OG_E_NO_PAGES 0x10000           /* not an E_PATCH_* code: the reservation failed */
 
 #define RD32(a) (*(volatile uint32_t *)(a))
 #define RD16(a) (*(volatile uint16_t *)(a))
@@ -296,6 +297,17 @@ static int og_apply_rom(void)
         og_rom_patch[np] = start;
         np++;
         i = k;
+    }
+    /* runtime MMU pages for what these patches still need (pages remapped before, by us or
+     * another feature, are reused: a re-enable adds nothing) */
+    /* in 3 steps (a third of the patches, two thirds, all): each call allocates only what is
+     * still missing, so no single ~700 KB AllocateMemory block (one failed once, run 42) */
+    for (int step = 1; step <= 3 && !err; step++)
+    {
+        int m = np * step / 3;
+        int e = mmu_reserve_pages_for_patches(p, m);
+        og_log("mmu_reserve_pages_for_patches(%d of %d) = %d", m, np, e);
+        if (e) err = OG_E_NO_PAGES;
     }
     if (!err) err = apply_patches(p, np);   /* copies the arrays; all or nothing */
     for (int b = 0; b < np; b++) free(bufs[b]);
@@ -565,25 +577,9 @@ static int og_prepare(const struct og_rate * r)
  * commit / remove (worker task, or the property handler under og_lock)
  * ------------------------------------------------------------------------ */
 
-static int og_pages_ok;
-
-static int og_reserve_pages(void)
-{
-    if (og_pages_ok) return 1;
-    for (int i = 0; i < COUNT(og_reserve_steps); i++)
-    {
-        int e = mmu_reserve_runtime_pages(og_reserve_steps[i][0], og_reserve_steps[i][1]);
-        og_log("mmu_reserve_runtime_pages(%d, %d) = %d", og_reserve_steps[i][0], og_reserve_steps[i][1], e);
-        if (e) return 0;
-    }
-    og_pages_ok = 1;
-    return 1;
-}
-
 /* the fps24 module (Canon's 24.00p row) is in when its row caption word is patched. The two
- * exclude each other: 24.00p uses its own sensor timing column and fps index, and both
- * take runtime MMU pages from the same 19-page pool (a page stays taken once used, so
- * after the other one was in, a reboot is needed) */
+ * features exclude each other (24.00p uses its own sensor timing column and fps index): the
+ * open gate waits while fps24 is ON; turning that entry off is enough */
 static int og_fps24_in(void)
 {
     return RD32(OG_FPS24_ROW_WORD) != 0;
@@ -592,11 +588,9 @@ static int og_fps24_in(void)
 static int og_commit(void)
 {
     if (RECORDING) { og_reason = "Stop recording first"; return 0; }
-    if (!og_reserve_pages()) { og_reason = "Not enough memory for the patches"; return 0; }
     int e = og_apply_rom();
     if (e) { og_reason = e == E_PATCH_TOO_MANY_PATCHES ? "Too many ML patches active"
-                       : e == E_PATCH_CANNOT_MALLOC ? "Not enough memory for the patches"
-                       : e == E_PATCH_BAD_MMU_PAGE ? "No MMU page left (reboot if fps24 was on)"
+                       : e == E_PATCH_CANNOT_MALLOC || e == OG_E_NO_PAGES ? "Not enough memory for the patches"
                        : "ROM patch refused"; return 0; }
     if (!og_check_ram())     /* re-check right before writing */
     {
@@ -1139,7 +1133,7 @@ static MENU_UPDATE_FUNC(og_update)
             if (og_hdmi)
                 MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Disconnect HDMI.");
             else if (og_fps24_in())
-                MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Turn the fps24 module off (then reboot).");
+                MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Turn 24.00p (fps24) OFF first.");
             else if (og_setting_bad == 2)
                 MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Turn Canon movie cropping OFF.");
             else if (og_setting_bad == 3)

@@ -257,12 +257,9 @@ static const struct og_word og_enc_words[] =
 };
 
 /* runtime MMU pages: E0130000 E0320000 E0360000 E0370000 E0380000 E0390000 E03B0000
- * E07F0000 E0C70000 E0FF0000 E1F10000 (11) in sections E01 E03 E07 E0C E0F E1F (6),
- * on top of the 6 pages / 6 L2 tables the port takes at boot. Reserved in small
- * steps: one ~710 KB AllocateMemory block failed once (RESULTS run 42). */
-#define OG_BOOT_PAGES   6
-#define OG_BOOT_L2      6
-static const uint8_t og_reserve_steps[][2] = { { 10, 8 }, { 14, 10 }, { 17, 12 } };
+ * E07F0000 E0C70000 E0FF0000 E1F10000 (11) in sections E01 E03 E07 E0C E0F E1F (6).
+ * Reserved by mmu_reserve_pages_for_patches() (core) for the patch list itself, in 3 steps:
+ * one ~710 KB AllocateMemory block failed once (RESULTS run 42). */
 
 /* the fps24 module patches this word (Canon's 24.00p row caption, stock 0) */
 #define OG_FPS24_ROW_WORD 0xE1F107D0

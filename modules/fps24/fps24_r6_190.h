@@ -193,12 +193,8 @@ static const struct f24_word f24_p7[] =
 };
 
 /* runtime MMU pages E1F10000, E0B70000, E06B0000, E03D0000, E08C0000, E0810000 (6) in sections
- * E1F, E0B, E06, E03, E08 on top of the port's 6 runtime pages / 6 L2 tables. The port's
- * runtime pages are in sections E07 E05 E03 E04 E0D (E03A0000 shares E03 with P5), so 4
- * more tables cover the union in every case (platform/R6.190/internals.h: max 19 pages,
- * 12 L2 tables) */
-#define F24_PAGES         (6 + 6)
-#define F24_L2            (6 + 4)
+ * E1F, E0B, E06, E03, E08, reserved by mmu_reserve_pages_for_patches() (core) for the patch
+ * list itself; pages remapped before (also by opengate, E1F10000) are reused */
 
 /* the opengate module is in when its first HEVC level word (30p ALL-I, stock 52) is patched */
 #define F24_OPENGATE_WORD 0xE1F1E7CC
