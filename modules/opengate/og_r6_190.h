@@ -283,6 +283,12 @@ static const struct og_word og_player_words[] =
  * and adds E01 E0C E0F E1F. With the 60-min option on, E04 and page E04E0000 are already
  * mapped: 6 + 11 + 1 = 18 pages, 5 + 4 = 9 L2 tables; with it off, at most
  * 2 + 11 + 2 = 15 pages and 2 + 6 + 1 = 9 L2 tables. Both inside 19 / 12 */
+/* diagnostic D1 (PLAYER-2736.md 8.4), with P1-P3: 4096 x any height takes the 8K playback
+ * path (ORCA working size halved, Rsz mode 3). Camera: P1-P3 alone stop within 0.2 s of the
+ * preview start, for H.264 and HEVC, level 5.1 or 6.1; 4096x2160 plays stock */
+static const struct og_word og_player_d1 =
+    { 0xE04EFB90, 0x2402FDC1, 0x2401FDC1, 1, "OG player test: 8K resize path" };  /* movs r4,#2 -> #1 */
+
 #define OG_PLAYER_PAGES   2
 #define OG_PLAYER_L2      1
 #define OG_ALL_PAGES      19

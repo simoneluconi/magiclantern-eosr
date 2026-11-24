@@ -639,29 +639,36 @@ static int og_player_can_change(void)
     return lv && !is_play_or_qr_mode() && !RECORDING;
 }
 
-static int og_player_apply(void)
+/* the words of a player mode: 1 = P1-P3, 2 = P1-P3 + D1 (test) */
+static const struct og_word * og_player_word(int mode, int i)
 {
-    struct patch p[COUNT(og_player_words)];
-    for (int i = 0; i < COUNT(og_player_words); i++)
+    if (i < COUNT(og_player_words)) return &og_player_words[i];
+    return mode == 2 && i == COUNT(og_player_words) ? &og_player_d1 : 0;
+}
+
+static int og_player_apply(int mode)
+{
+    struct patch p[COUNT(og_player_words) + 1];
+    int n = 0;
+    for (const struct og_word * w; (w = og_player_word(mode, n)); n++)
     {
-        const struct og_word * w = &og_player_words[i];
         if (RD32(w->addr) != w->stock)
         {
             og_log("player: rom %08x (%s) is %08x, not %08x", w->addr, w->what, RD32(w->addr), w->stock);
             og_player_why = "ROM not stock";
             return 0;
         }
-        p[i] = (struct patch) { .addr = (uint8_t *) w->addr, .old_value = w->stock, .new_value = w->val,
+        p[n] = (struct patch) { .addr = (uint8_t *) w->addr, .old_value = w->stock, .new_value = w->val,
                                 .size = 4, .is_instruction = w->insn, .description = w->what };
     }
     /* alone: the boot pages plus its own; with the open gate: room for both */
     int ok = og_pages_ok ? og_reserve(OG_ALL_PAGES, OG_ALL_L2)
                          : og_reserve(OG_BOOT_PAGES + OG_PLAYER_PAGES, OG_BOOT_L2 + OG_PLAYER_L2);
     if (!ok) { og_player_why = "Not enough memory for the patches"; return 0; }
-    int e = apply_patches(p, COUNT(p));
-    og_log("player: apply %x", e);
+    int e = apply_patches(p, n);
+    og_log("player: apply mode %d (%d words) %x", mode, n, e);
     if (e) { og_player_why = e == E_PATCH_TOO_MANY_PATCHES ? "Too many ML patches active" : "ROM patch refused"; return 0; }
-    og_player_in = 1;
+    og_player_in = mode;
     og_player_why = "";
     return 1;
 }
@@ -828,10 +835,12 @@ static void og_dm_step(void)
 static void og_player_remove(void)
 {
     og_dm_restore();
-    for (int i = COUNT(og_player_words) - 1; i >= 0; i--)
+    int n = 0;
+    while (og_player_word(og_player_in, n)) n++;
+    for (int i = n - 1; i >= 0; i--)
     {
-        int e = unpatch_memory(og_player_words[i].addr);
-        if (e) og_log("player: unpatch %08x: %x", og_player_words[i].addr, e);
+        int e = unpatch_memory(og_player_word(og_player_in, i)->addr);
+        if (e) og_log("player: unpatch %08x: %x", og_player_word(og_player_in, i)->addr, e);
     }
     og_player_in = 0;
     og_log("player: removed");
@@ -839,9 +848,10 @@ static void og_player_remove(void)
 
 static void og_player_step(void)
 {
-    if (!og_player == !og_player_in || !og_player_can_change()) return;
-    if (!og_player) { og_player_remove(); return; }
-    if (og_player_apply())
+    if (og_player == og_player_in || !og_player_can_change()) return;
+    if (og_player_in) og_player_remove();           /* off, or another mode */
+    if (!og_player) return;
+    if (og_player_apply(og_player))
         NotifyBox(2000, "Open gate clips: playback ON");
     else
     {
@@ -1392,7 +1402,7 @@ static MENU_UPDATE_FUNC(og_update)
 
 static MENU_UPDATE_FUNC(og_player_update)
 {
-    if (!og_player != !og_player_in)
+    if (og_player != og_player_in)
         MENU_SET_WARNING(MENU_WARN_INFO, "Takes effect in LiveView (not in playback or while recording).");
     else if (!og_player && og_player_why[0])
         MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Refused: %s", og_player_why);
@@ -1412,10 +1422,11 @@ static struct menu_entry og_menu[] =
             {
                 .name   = "Play open gate clips",
                 .priv   = &og_player,
-                .max    = 1,
+                .max    = 2,
+                .choices = CHOICES("OFF", "ON", "ON, 8K resize (test)"),
                 .update = og_player_update,
                 .help   = "Experimental: Canon's player opens 4096x2736 clips. OFF at every boot.",
-                .help2  = "Set in LiveView. Don't use frame grab, trim or resize on these clips.",
+                .help2  = "Set in LiveView. Test: the 8K resize path for the preview (diagnostic).",
             },
             {
                 .name   = "Debug log",
