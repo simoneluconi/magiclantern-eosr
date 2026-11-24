@@ -48,8 +48,8 @@ static const char * og_reason = "";     /* why the last apply was refused or rem
 
 /* the movie setting, learnt from Canon's stock 4K <= 30p LV */
 static volatile int og_setting_col;      /* timing column 2/3/4, 0 = unknown or not OK */
-static volatile int og_setting_bad;      /* seen a movie mode that is not 4K <= 30p */
-static volatile int og_setting_changed;  /* PROP_VIDEO_MODE changed since the last look */
+static volatile int og_setting_bad;      /* 1 not 4K <= 30p, 2 crop, 3 fps not supported */
+static volatile int og_setting_seq;      /* og_vmode_changes when the setting was learnt */
 static volatile int og_hdmi;
 static const struct og_rate * og_rate;   /* rate of the applied set */
 
@@ -127,25 +127,16 @@ static const uint32_t og_copy_len[CP_N] =
     (OG_ST8_VIR_N + OG_ST8_VOFF_N) * OG_ST8_KNOTS * 4,
 };
 
-static void og_free_copies(void)
-{
-    for (int i = 0; i < CP_N; i++)
-    {
-        if (og_copy[i]) free(og_copy[i]);
-        og_copy[i] = 0;
-    }
-}
-
+/* allocated at the first apply and never freed (about 38 KB): Canon may keep a pointer
+ * to a copy read during a LiveView setup after the words are restored, and a copy left
+ * by a deferred word stays in use until Canon rewrites it. The next apply rebuilds the
+ * same content in place, at a safe point. */
 static int og_alloc_copies(void)
 {
     for (int i = 0; i < CP_N; i++)
     {
-        og_copy[i] = malloc(og_copy_len[i]);
-        if (!og_copy[i])
-        {
-            og_free_copies();
-            return 0;
-        }
+        if (!og_copy[i]) og_copy[i] = malloc(og_copy_len[i]);
+        if (!og_copy[i]) return 0;
     }
     return 1;
 }
@@ -281,8 +272,9 @@ static int og_check_ram(void)
     return 1;
 }
 
-/* restore in reverse order; deferred words only when allowed. Returns the number of
- * words left changed (deferred or not restorable) */
+/* restore in reverse order; deferred words only when allowed. A word that Canon has
+ * rewritten (neither stock nor ours) is Canon's again: logged and left alone. Returns the
+ * number of deferred words still to restore */
 static int og_restore_ram(int include_deferred)
 {
     int left = 0;
@@ -291,9 +283,12 @@ static int og_restore_ram(int include_deferred)
         struct og_ramw * w = &og_ram[i];
         uint32_t v = og_get(w->addr, w->size);
         if (v == w->stock) continue;
-        if (w->deferred && !include_deferred) { left++; continue; }
-        if (v == w->val) og_set(w->addr, w->size, w->stock);
-        else { og_log("ram %08x is %x (neither stock %x nor ours %x), left", w->addr, v, w->stock, w->val); left++; }
+        if (v != w->val)
+            og_log("ram %08x is %x (neither stock %x nor ours %x), left to Canon", w->addr, v, w->stock, w->val);
+        else if (w->deferred && !include_deferred)
+            left++;
+        else
+            og_set(w->addr, w->size, w->stock);
     }
     return left;
 }
@@ -486,7 +481,9 @@ static int og_prepare(const struct og_rate * r)
         uint32_t * t = tabs + i * OG_ST8_KNOTS;
         for (int j = 0; j < OG_ST8_KNOTS; j++)
             t[j] = RD32(src + 4 * (j < OG_ST8_KNOTS_STOCK ? j : OG_ST8_KNOTS_STOCK - 1));
-        og_add_ram(slot, 4, src, (uint32_t) t, 0);
+        /* deferred: stage 8 reads 120 words per frame (count set at SetPath) until the
+         * next setup; words 0-95 of the copies are stock, so a copy is safe in any mode */
+        og_add_ram(slot, 4, src, (uint32_t) t, 1);
     }
     og_add_words(og_knot_words, COUNT(og_knot_words));
 
@@ -537,8 +534,8 @@ static int og_commit(void)
     return 1;
 }
 
-/* full removal at a safe point frees the copies; elsewhere the MemoryNavigator words
- * and the copies are kept until the next safe point (they are harmless alone) */
+/* outside a safe point the deferred words (MemoryNavigator raw entries, stage-8 table
+ * slots) stay until the next one: they are harmless alone */
 static int og_pending_deferred;
 
 static void og_remove(void)
@@ -547,7 +544,6 @@ static void og_remove(void)
     og_remove_rom();
     int left = og_restore_ram(safe);
     og_pending_deferred = left > 0;
-    if (!left) og_free_copies();
     og_log("remove: %s, %d words left", safe ? "safe point" : "LV running", left);
 }
 
@@ -556,7 +552,6 @@ static void og_finish_deferred(void)
     if (!og_pending_deferred || !og_safe_point()) return;
     int left = og_restore_ram(1);
     og_pending_deferred = left > 0;
-    if (!left) og_free_copies();
     og_log("deferred restore: %d words left", left);
 }
 
@@ -570,41 +565,56 @@ static int og_removal_needed(void)
     return og_state == OG_APPLIED || og_state == OG_ACTIVE || og_state == OG_REMOVING;
 }
 
-static volatile int og_removed_by_handler;
+/* a lost setting is always recorded here first; whoever holds og_lock next (the handler
+ * below, or the worker if the handler could not take the lock or a recording runs)
+ * removes the patches. So a change that arrives while the worker is applying is never
+ * missed: the worker finishes the apply, gives the lock, and the removal follows. */
+static volatile int og_lost_pending;
+static const char * volatile og_lost_why = "";
+static volatile int og_removed_notice;  /* removal to show to the user (worker) */
 
-/* the caller holds og_lock (worker task, or og_setting_lost below) */
-static int og_lost_locked(const char * why)
+/* the caller holds og_lock */
+static void og_handle_lost_locked(void)
 {
+    if (!og_lost_pending || RECORDING) return;
+    og_lost_pending = 0;
     og_setting_col = 0;
-    og_setting_changed = 1;
-    if (!og_removal_needed() || RECORDING) return 0;
+    if (!og_removal_needed()) return;
     og_remove();
-    og_reason = why;
+    og_reason = og_lost_why;
     og_state = og_ui ? OG_ARMED : OG_OFF;
-    return 1;
+    og_removed_notice = 1;
 }
 
-/* from a property handler (task context): remove at once, under the lock */
+/* from a property handler (task context): remove at once if possible */
 static void og_setting_lost(const char * why)
 {
     og_setting_col = 0;
-    og_setting_changed = 1;
-    if (!og_removal_needed() || RECORDING) return;
-    if (take_semaphore(og_lock, 1000) != 0) return;
-    if (og_lost_locked(why)) og_removed_by_handler = 1;
+    og_lost_why = why;
+    og_lost_pending = 1;
+    if (RECORDING) return;                          /* the worker removes after the stop */
+    if (take_semaphore(og_lock, 1000) != 0) return; /* the worker removes on its next step */
+    og_handle_lost_locked();
     give_semaphore(og_lock);
 }
 
-static uint32_t og_vmode[4];
-static volatile int og_vmode_changes;   /* logged by the worker (debug) */
+/* raw words; 0..2 = crop, resolution, fps x 100 on DIGIC X (src/propvalues.c). Only
+ * these three are compared: the meaning of the others is not known on R6 */
+#define OG_VMODE_N 4
+#define OG_VMODE_CMP 3
+static uint32_t og_vmode[OG_VMODE_N];
+static volatile int og_vmode_changes;
 
 PROP_HANDLER(PROP_VIDEO_MODE)
 {
     og_in_handler = 1;
-    int n = MIN(len / 4, 4);
+    int n = MIN(len / 4, OG_VMODE_N);
     int changed = 0;
     for (int i = 0; i < n; i++)
-        if (og_vmode[i] != buf[i]) { og_vmode[i] = buf[i]; changed = 1; }
+    {
+        if (og_vmode[i] != buf[i] && i < OG_VMODE_CMP) changed = 1;
+        og_vmode[i] = buf[i];
+    }
     if (changed)
     {
         og_vmode_changes++;
@@ -632,53 +642,86 @@ static const struct og_rate * og_rate_of_col(int col)
     return 0;
 }
 
+/* the Canon fps setting must be the rate of the column: column 4 is also 24.00p and
+ * column 2 may be 30.00p. Returns 1 if OK; if buf[2] does not look like fps x 100 the
+ * layout is not the expected one and only the live checks remain (logged) */
+static int og_fps_ok(int col)
+{
+    uint32_t f = og_vmode[2];
+    if (f < 1000 || f > 12000)
+    {
+        static int logged;
+        if (!logged) { logged = 1; og_log("PROP_VIDEO_MODE[2] = %d is not fps x 100: fps not checked", f); }
+        return 1;
+    }
+    const struct og_rate * r = og_rate_of_col(col);
+    return r && f == r->fps100;
+}
+
 /* learn the setting from Canon's own (unpatched) movie LV */
 static void og_observe_setting(void)
 {
     if (!lv || og_path() != OG_PATH_MOVIE || og_removal_needed()) return;
+    int seq = og_vmode_changes;
     int cap = og_capmode(), slot = og_slot(), col = og_rd(OG_TIMING_INFO + 0x24);
-    if (cap == OG_CAPMODE_4K30 && slot == OG_SLOT_4K30 && og_rate_of_col(col))
+    int bad = 0;
+    if (cap == OG_CAPMODE_4KCROP) bad = 2;
+    else if (cap != OG_CAPMODE_4K30 || slot != OG_SLOT_4K30 || !og_rate_of_col(col)) bad = 1;
+    else if (!og_fps_ok(col)) bad = 3;
+    if (seq != og_vmode_changes) return;    /* the setting changed while reading: next time */
+    if (!bad)
     {
         if (og_setting_col != col) og_log("setting: 4K %s", og_rate_of_col(col)->name);
         og_setting_col = col;
-        og_setting_bad = 0;
+        og_setting_seq = seq;
     }
     else
     {
-        if (!og_setting_bad) og_log("setting not usable: capmode %x slot %d fps idx %d", cap, slot, col);
+        if (og_setting_bad != bad)
+            og_log("setting not usable (%d): capmode %x slot %d fps idx %d fps %d", bad, cap, slot, col, og_vmode[2]);
         og_setting_col = 0;
-        og_setting_bad = cap == OG_CAPMODE_4KCROP ? 2 : 1;
     }
+    og_setting_bad = bad;
 }
 
 static int og_active_since;
+static int og_bad_samples;
 
-/* movie LV with the patches in: the live state must be the open-gate one */
+#define OG_BAD_SAMPLES 10   /* 1 s of wrong live state before giving up (Canon re-setups) */
+
+/* movie LV with the patches in: the live state must be the open-gate one. If it is not,
+ * the patches are removed at the next safe point and the entry is turned off */
 static void og_check_live(void)
 {
-    if (!lv || og_path() != OG_PATH_MOVIE) { og_active_since = 0; return; }
+    if (!lv || og_path() != OG_PATH_MOVIE) { og_active_since = 0; og_bad_samples = 0; return; }
     if (!og_active_since) { og_active_since = get_ms_clock(); return; }
     if (get_ms_clock() - og_active_since < 1500) return;
     int cap = og_capmode(), slot = og_slot(), vd = og_rd(OG_IMGCTRL + 0x10);
     int ok = cap == OG_CAPMODE_4K30 && slot == OG_SLOT_FULL && og_rate
           && vd >= og_rate->fl && vd <= og_rate->fl + 2;
-    if (ok && og_state == OG_APPLIED)
+    if (ok)
     {
-        og_state = OG_ACTIVE;
-        og_log("active: capmode %x slot %d VD %d", cap, slot, vd);
+        if (og_bad_samples) og_log("live state back after %d bad samples", og_bad_samples);
+        og_bad_samples = 0;
+        if (og_state == OG_APPLIED)
+        {
+            og_state = OG_ACTIVE;
+            og_log("active: capmode %x slot %d VD %d", cap, slot, vd);
+        }
+        return;
     }
-    else if (!ok && og_state == OG_ACTIVE && !RECORDING)
-    {
-        og_log("live check failed: capmode %x slot %d VD %d", cap, slot, vd);
-        NotifyBox(5000, "Open gate: unexpected movie mode,\nturned off. Check the movie size.");
-        og_lost_locked("Unexpected movie mode");
-    }
-    else if (!ok && og_state == OG_APPLIED && get_ms_clock() - og_active_since > 4000 && !RECORDING)
-    {
-        og_log("live check failed after start: capmode %x slot %d VD %d", cap, slot, vd);
-        NotifyBox(5000, "Open gate: not taking effect,\nturned off.");
-        og_lost_locked("Not taking effect");
-    }
+    if (!og_bad_samples++) og_log("live state wrong: capmode %x slot %d VD %d", cap, slot, vd);
+    if (RECORDING) return;
+    int give_up = og_state == OG_ACTIVE ? og_bad_samples >= OG_BAD_SAMPLES
+                : get_ms_clock() - og_active_since > 4000;
+    if (!give_up) return;
+    og_log("live check failed (%s): capmode %x slot %d VD %d",
+           og_state == OG_ACTIVE ? "active" : "after start", cap, slot, vd);
+    og_reason = og_state == OG_ACTIVE ? "Unexpected movie mode" : "Not taking effect";
+    NotifyBox(6000, "Open gate: %s.\nTurned off: switch to photo mode once.", og_reason);
+    og_ui = 0;
+    og_state = OG_REMOVING;
+    og_bad_samples = 0;
 }
 
 static void og_step(void)
@@ -689,10 +732,11 @@ static void og_step(void)
         logged_vmode_changes = og_vmode_changes;
         og_log("PROP_VIDEO_MODE %x %x %x %x (path %x)", og_vmode[0], og_vmode[1], og_vmode[2], og_vmode[3], og_path());
     }
-    if (og_removed_by_handler)
+    og_handle_lost_locked();
+    if (og_removed_notice)
     {
-        og_removed_by_handler = 0;
-        og_log("removed by a property change: %s", og_reason);
+        og_removed_notice = 0;
+        og_log("removed by a setting change: %s", og_reason);
         NotifyBox(4000, "Open gate turned off:\n%s", og_reason);
     }
     og_observe_setting();
@@ -706,13 +750,14 @@ static void og_step(void)
 
         case OG_ARMED:
             if (!og_ui) { og_state = OG_OFF; break; }
-            if (og_pending_deferred || og_hdmi || !og_setting_col || !og_safe_point() || !lv) break;
+            if (og_pending_deferred || og_hdmi || !og_safe_point() || !lv) break;
             {
-                const struct og_rate * r = og_rate_of_col(og_setting_col);
+                int col = og_setting_col;   /* read once: the handler may zero it */
+                const struct og_rate * r = og_rate_of_col(col);
+                if (!r || og_setting_seq != og_vmode_changes || !og_fps_ok(col)) break;
                 if (!og_alloc_copies()) { og_reason = "Not enough memory"; og_ui = 0; og_state = OG_OFF; break; }
                 if (!og_prepare(r) || !og_commit())
                 {
-                    og_free_copies();
                     og_log("apply refused: %s", og_reason);
                     NotifyBox(5000, "Open gate refused:\n%s", og_reason);
                     og_ui = 0;
@@ -720,8 +765,8 @@ static void og_step(void)
                     break;
                 }
                 og_rate = r;
-                og_setting_changed = 0;
                 og_active_since = 0;
+                og_bad_samples = 0;
                 og_state = OG_APPLIED;
                 og_log("applied: 4K %s", r->name);
             }
@@ -783,6 +828,8 @@ static MENU_UPDATE_FUNC(og_update)
                 MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Disconnect HDMI.");
             else if (og_setting_bad == 2)
                 MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Turn Canon movie cropping OFF.");
+            else if (og_setting_bad == 3)
+                MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Use 25p, 29.97p or 23.98p (24.00p / 30.00p not supported).");
             else if (og_setting_bad || !og_setting_col)
                 MENU_SET_WARNING(MENU_WARN_ADVICE, "Set Canon movie size to 4K 25p / 29.97p / 23.98p and enter movie mode once.");
             else
@@ -804,7 +851,7 @@ static struct menu_entry og_menu[] =
         .max     = 1,
         .update  = og_update,
         .help    = "Whole sensor (3:2) in 4K: 4096x2736 HEVC 10-bit, 25p / 29.97p / 23.98p.",
-        .help2   = "Canon: 4K 25/29.97/23.98p, crop OFF. Enter movie, then photo mode once.",
+        .help2   = "Canon: 4K 25/29.97/23.98p, 10-bit, crop OFF. Enter movie, then photo mode once.",
         .submenu_width = 650,
         .children = (struct menu_entry[]) {
             {

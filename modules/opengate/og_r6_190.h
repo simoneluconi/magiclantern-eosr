@@ -72,12 +72,14 @@ static const struct og_cell og_sensor_cells[] =
 #define OG_TIMING_TABLE 0x42BAA11C
 #define OG_TCELL(off, col)  (OG_TIMING_TABLE + (off) + 15 * 0x20 + 2 * (col))
 #define OG_TCART(col)       (OG_TIMING_TABLE + 0x1180 + 15 * 0x40 + 4 * (col))
-struct og_rate { uint8_t col; const char * name; uint16_t fl_stock, fl, rps_stock, rps; };
+/* fps100 = PROP_VIDEO_MODE buf[2] (fps x 100 on DIGIC X, src/propvalues.c). Column 4 also
+ * serves 24.00p, which needs FL 2147: refused (DESIGN.md 3.2) */
+struct og_rate { uint8_t col; const char * name; uint16_t fl_stock, fl, rps_stock, rps, fps100; };
 static const struct og_rate og_rates[] =
 {
-    { 2, "29.97p", 790, 1719, 766, 1667 },
-    { 3, "25p",    947, 2061, 923, 2010 },
-    { 4, "23.98p", 987, 2149, 964, 2097 },
+    { 2, "29.97p", 790, 1719, 766, 1667, 2997 },
+    { 3, "25p",    947, 2061, 923, 2010, 2500 },
+    { 4, "23.98p", 987, 2149, 964, 2097, 2398 },
 };
 #define OG_T_SETP_STOCK  655        /* +0x280 */
 #define OG_T_SETP        627
