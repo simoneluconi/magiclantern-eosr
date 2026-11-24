@@ -524,12 +524,21 @@ static void FAST default_movie_cropmarks()
         int y2 = (crop_y & 0xFFFF);
         
         bool draw = (y < y1 || y > y2);
-        
+
+        /* the bars mask the LV image outside the recorded frame, so draw
+         * them only over the image. Most LV buffers include the bars, but
+         * some only hold the recorded frame (CONFIG_FACEYUV_LV, vram.c):
+         * there a bar would only hide the camera's own graphics. */
+        int lv_y = BM2LV_Y(y);
+        bool image_row = (lv_y >= 0 && lv_y < vram_lv.height);
+
         for (x = os.x0; x < os.x_max; x++)
         {
             int newcolor = 0;
             int newcolor_with_flag = 0;
-            if(draw || (x < x1 || x > x2))
+            int lv_x = BM2LV_X(x);
+            bool image = image_row && lv_x >= 0 && lv_x < vram_lv.width;
+            if (image && (draw || (x < x1 || x > x2)))
             {
                 /* default cropmarks are black */
                 /* border pixels should be brighter, to be visible in dark */

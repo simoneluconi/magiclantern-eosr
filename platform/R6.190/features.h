@@ -55,6 +55,12 @@
 #define FEATURE_WAVEFORM
 // reads the same FaceYuv image; signed chroma, as vectorscope.c expects
 #define FEATURE_VECTORSCOPE
+// Overlay > Cropmarks: bitmaps from ML/CROPMKS over the 3:2 LV area, as
+// on R / M50; the movie frame is the 16:9 band (os.off_169). The default
+// movie bars stay off the screen here: the movie LV image is already only
+// the recorded 16:9 frame (cropmarks.c). PLAY mode cropmarks need
+// IMGPLAY_ZOOM_LEVEL_ADDR, still unknown on R6 (consts.h).
+#define FEATURE_CROPMARKS
 
 // Shoot > Motion Detect (not native on R6). Reads the FaceYuv image, so it
 // only detects in LV with the LCD or the EVF alone; takes pictures
