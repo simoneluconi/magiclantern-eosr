@@ -52,7 +52,7 @@ static const char * og_reason = "";     /* why the last apply was refused or rem
 /* the movie setting, learnt from Canon's stock 4K <= 30p LV */
 static volatile int og_setting_col;      /* timing column 2/3/4, 0 = unknown or not OK */
 static volatile int og_setting_bad;      /* 1 not 4K <= 30p, 2 crop, 3 fps not supported */
-static volatile int og_setting_seq;      /* og_vmode_changes when the setting was learnt */
+static volatile int og_setting_seq;      /* og_setting_changes when the setting was learnt */
 static volatile int og_hdmi;
 static const struct og_rate * og_rate;   /* rate applied, then the live one (all columns are patched) */
 
@@ -733,37 +733,97 @@ static void og_setting_lost(const char * why)
     give_semaphore(og_lock);
 }
 
-/* raw words; 0..2 = crop, resolution, fps x 100 on DIGIC X (src/propvalues.c). Only
- * these three are compared: the meaning of the others is not known on R6 */
-#define OG_VMODE_N 4
-#define OG_VMODE_CMP 3
-static uint32_t og_vmode[OG_VMODE_N];
-static volatile int og_vmode_changes;
-static volatile int og_vmode_calls, og_vmode_len;   /* debug: is the property delivered on R6? */
+/* Canon's movie setting: PROP_MOVIE_CONTROL_PARAM and PROP_MOVIE_CROP_MODE (src/property.h;
+ * delivered by an ML core with CONFIG_PROP_MOVIE_CONTROL_PARAM, R6 has no PROP_VIDEO_MODE).
+ * With an older core neither arrives and only the live checks remain. */
+struct og_mcp { uint32_t fps100, size, readout, f24; };
+static struct og_mcp og_mcp;            /* last posted */
+static volatile int og_mcp_calls;
+static volatile int og_crop;            /* movie crop on */
+static volatile int og_setting_changes; /* counts posted changes of the setting */
 
-PROP_HANDLER(PROP_VIDEO_MODE)
+#define OG_MCP_SIZE_UHD     5
+#define OG_MCP_READOUT_FULL 5
+#define OG_MCP_F24          2           /* byte 0x30 for 24.00p (same fps100 rounding as 23.98p) */
+
+static const struct og_rate * og_rate_of_col(int col)
+{
+    for (int i = 0; i < COUNT(og_rates); i++)
+        if (og_rates[i].col == col) return &og_rates[i];
+    return 0;
+}
+
+/* the timing column of a supported setting, or 0 with the reason */
+static int og_mcp_col(const struct og_mcp * m, const char ** why)
+{
+    const char * w = "";
+    int col = 0;
+    if (m->size != OG_MCP_SIZE_UHD) w = "Movie size is not 4K";
+    else if (m->readout != OG_MCP_READOUT_FULL) w = "Movie crop on";
+    else if (m->f24 == OG_MCP_F24) w = "24.00p not supported";
+    else
+    {
+        for (int i = 0; i < COUNT(og_rates); i++)
+            if (og_rates[i].fps100 == m->fps100) col = og_rates[i].col;
+        if (!col) w = "Frame rate not supported";
+    }
+    if (why) *why = w;
+    return col;
+}
+
+/* debug: when each posting comes, relative to Canon's LiveView state (is the setting
+ * posted before the movie LV restarts?). Written by the handlers, logged by the worker */
+struct og_ev { int ms; uint32_t prop, a, b, c, d; int cap, slot, path, state; };
+#define OG_EV_N 16
+static struct og_ev og_ev[OG_EV_N];
+static volatile int og_ev_w, og_ev_r;
+
+static void og_event(uint32_t prop, uint32_t a, uint32_t b, uint32_t c, uint32_t d)
+{
+    if (!og_debug || og_ev_w - og_ev_r >= OG_EV_N) return;
+    og_ev[og_ev_w % OG_EV_N] = (struct og_ev) { get_ms_clock(), prop, a, b, c, d,
+                                                og_capmode(), og_slot(), og_path(), og_state };
+    og_ev_w++;
+}
+
+PROP_HANDLER(PROP_MOVIE_CONTROL_PARAM)
 {
     og_in_handler = 1;
-    og_vmode_calls++;
-    og_vmode_len = len;
-    int n = MIN(len / 4, OG_VMODE_N);
-    int changed = 0;
-    for (int i = 0; i < n; i++)
+    if (len >= PROP_MOVIE_CONTROL_PARAM_LEN)
     {
-        if (og_vmode[i] != buf[i] && i < OG_VMODE_CMP) changed = 1;
-        og_vmode[i] = buf[i];
+        const uint8_t * b = (const uint8_t *) buf;
+        struct og_mcp m = { buf[1], b[8], b[0x2C], b[0x30] };
+        og_event(PROP_MOVIE_CONTROL_PARAM, m.fps100, m.size, m.readout, m.f24);
+        int changed = !og_mcp_calls || memcmp(&m, &og_mcp, sizeof(m)) != 0;
+        og_mcp = m;
+        og_mcp_calls++;
+        if (changed)
+        {
+            og_setting_changes++;
+            /* a supported rate stays applied: all three columns are patched, and the
+             * live check follows the live one */
+            const char * why;
+            if (!og_mcp_col(&m, &why)) og_setting_lost(why);
+        }
     }
-    if (changed)
-    {
-        og_vmode_changes++;
-        og_setting_lost("Movie size or fps changed");
-    }
+    og_in_handler = 0;
+}
+
+PROP_HANDLER(PROP_MOVIE_CROP_MODE)
+{
+    og_in_handler = 1;
+    og_event(PROP_MOVIE_CROP_MODE, buf[0], 0, 0, 0);
+    int c = buf[0] != 0;
+    if (c != og_crop) og_setting_changes++;
+    og_crop = c;
+    if (c) og_setting_lost("Movie crop on");
     og_in_handler = 0;
 }
 
 PROP_HANDLER(PROP_HDMI_CHANGE)
 {
     og_in_handler = 1;
+    og_event(PROP_HDMI_CHANGE, buf[0], 0, 0, 0);
     og_hdmi = buf[0];
     if (og_hdmi) og_setting_lost("HDMI connected");
     og_in_handler = 0;
@@ -773,30 +833,17 @@ PROP_HANDLER(PROP_HDMI_CHANGE)
  * worker task: the only place that applies; checks the live state
  * ------------------------------------------------------------------------ */
 
-static const struct og_rate * og_rate_of_col(int col)
+/* Canon's setting must be the rate of the column: column 4 is also 24.00p. Without the
+ * property (older ML core) only the live checks remain (logged by og_debug_step) */
+static int og_prop_ok(int col)
 {
-    for (int i = 0; i < COUNT(og_rates); i++)
-        if (og_rates[i].col == col) return &og_rates[i];
-    return 0;
+    if (!og_mcp_calls) return 1;
+    struct og_mcp m = og_mcp;
+    return !og_crop && og_mcp_col(&m, 0) == col;
 }
 
-/* the Canon fps setting must be the rate of the column: column 4 is also 24.00p and
- * column 2 may be 30.00p. Returns 1 if OK; if buf[2] does not look like fps x 100 the
- * layout is not the expected one and only the live checks remain (logged) */
-static int og_fps_ok(int col)
-{
-    uint32_t f = og_vmode[2];
-    if (f < 1000 || f > 12000)
-    {
-        static int logged;
-        if (!logged) { logged = 1; og_log("PROP_VIDEO_MODE[2] = %d is not fps x 100: fps not checked", f); }
-        return 1;
-    }
-    const struct og_rate * r = og_rate_of_col(col);
-    return r && f == r->fps100;
-}
-
-/* the learnt setting, saved for the next boot with the PROP_VIDEO_MODE words seen with it */
+/* the learnt setting, saved for the next boot with the property values seen with it
+ * (vm0 fps x 100, vm1 movie size, vm2 readout) */
 static CONFIG_INT("opengate.col", og_saved_col, 0);
 static CONFIG_INT("opengate.vm0", og_saved_vm0, 0);
 static CONFIG_INT("opengate.vm1", og_saved_vm1, 0);
@@ -806,8 +853,9 @@ static CONFIG_INT("opengate.vm.ok", og_saved_vm_ok, 0);
 /* written only when something changes (the config is saved at power off) */
 static void og_save_setting(int col)
 {
-    int ok = col && og_vmode_calls > 0;
-    int vm0 = ok ? (int) og_vmode[0] : 0, vm1 = ok ? (int) og_vmode[1] : 0, vm2 = ok ? (int) og_vmode[2] : 0;
+    struct og_mcp m = og_mcp;
+    int ok = col && og_mcp_calls > 0;
+    int vm0 = ok ? (int) m.fps100 : 0, vm1 = ok ? (int) m.size : 0, vm2 = ok ? (int) m.readout : 0;
     if (og_saved_col == col && og_saved_vm_ok == ok && og_saved_vm0 == vm0 && og_saved_vm1 == vm1 && og_saved_vm2 == vm2)
         return;
     og_saved_col = col;
@@ -825,14 +873,14 @@ static void og_observe_setting(void)
 {
     static int cand_bad = -1, cand_col, cand_n;
     if (!lv || og_path() != OG_PATH_MOVIE || og_removal_needed()) { cand_n = 0; return; }
-    int seq = og_vmode_changes;
+    int seq = og_setting_changes;
     int cap = og_capmode(), slot = og_slot(), col = og_rd(OG_TIMING_INFO + 0x24);
     if (cap == 0) { cand_n = 0; return; }   /* no capture mode: LV starting or stopping */
     int bad = 0;
-    if (cap == OG_CAPMODE_4KCROP) bad = 2;
+    if (cap == OG_CAPMODE_4KCROP || og_crop) bad = 2;
     else if (cap != OG_CAPMODE_4K30 || slot != OG_SLOT_4K30 || !og_rate_of_col(col)) bad = 1;
-    else if (!og_fps_ok(col)) bad = 3;
-    if (seq != og_vmode_changes) { cand_n = 0; return; }   /* the setting changed while reading */
+    else if (!og_prop_ok(col)) bad = 3;
+    if (seq != og_setting_changes) { cand_n = 0; return; }   /* the setting changed while reading */
     if (bad != cand_bad || col != cand_col) { cand_bad = bad; cand_col = col; cand_n = 0; }
     if (++cand_n < OG_STABLE) return;
     cand_n = OG_STABLE;
@@ -846,7 +894,8 @@ static void og_observe_setting(void)
     else
     {
         if (og_setting_bad != bad)
-            og_log("setting not usable (%d): capmode %x slot %d fps idx %d fps %d", bad, cap, slot, col, og_vmode[2]);
+            og_log("setting not usable (%d): capmode %x slot %d fps idx %d fps %d size %d readout %d crop %d",
+                   bad, cap, slot, col, og_mcp.fps100, og_mcp.size, og_mcp.readout, og_crop);
         og_setting_col = 0;
         og_save_setting(0);
     }
@@ -854,22 +903,23 @@ static void og_observe_setting(void)
 }
 
 /* after a boot in photo mode: reuse the setting of the last session, only if Canon's
- * PROP_VIDEO_MODE words (delivered at boot) are the ones seen with it. Movie settings
- * change only in movie mode, where the module observes them */
+ * movie setting (posted at boot) is the one seen with it. Movie settings change only in
+ * movie mode, where the module observes them */
 static void og_recall_setting(void)
 {
     static int done;
-    if (done || !og_vmode_calls) return;   /* once, after the boot delivery of the property */
+    if (done || !og_mcp_calls) return;   /* once, after the boot delivery of the property */
     done = 1;
     if (og_setting_col) return;
     const struct og_rate * r = og_rate_of_col(og_saved_col);
     if (!r) return;
-    int same = og_saved_vm_ok && og_saved_vm0 == (int) og_vmode[0]
-            && og_saved_vm1 == (int) og_vmode[1] && og_saved_vm2 == (int) og_vmode[2];
-    og_log("last session: 4K %s, PROP_VIDEO_MODE %s", r->name, same ? "same: reused" : "different: not reused");
-    if (!same || !og_fps_ok(r->col)) return;
+    struct og_mcp m = og_mcp;
+    int same = og_saved_vm_ok && og_saved_vm0 == (int) m.fps100
+            && og_saved_vm1 == (int) m.size && og_saved_vm2 == (int) m.readout;
+    og_log("last session: 4K %s, movie setting %s", r->name, same ? "same: reused" : "different: not reused");
+    if (!same || !og_prop_ok(r->col)) return;
     og_setting_col = r->col;
-    og_setting_seq = og_vmode_changes;
+    og_setting_seq = og_setting_changes;
 }
 
 static int og_active_since;
@@ -938,9 +988,24 @@ static void og_debug_step(void)
     og_assert_ctx[3] = play;
     og_assert_ctx[4] = og_path();
     og_assert_ctx[5] = og_capmode();
-    static int logged_play = -1;
-    if (og_player_in && play != logged_play) og_log("playback %s", play ? "entered" : "left");
+    static int logged_play = -1;        /* -1: player words not in (nothing logged yet) */
+    if (og_player_in && logged_play >= 0 && play != logged_play) og_log("playback %s", play ? "entered" : "left");
     logged_play = og_player_in ? play : -1;
+
+    /* property postings, with the LiveView state seen by the handler and now */
+    while (og_ev_r != og_ev_w)
+    {
+        struct og_ev e = og_ev[og_ev_r % OG_EV_N];
+        og_ev_r++;
+        og_log("prop %x at %d: %d %d %d %d; then capmode %x slot %d path %x state %d; now capmode %x slot %d path %x",
+               e.prop, e.ms, e.a, e.b, e.c, e.d, e.cap, e.slot, e.path, e.state, og_capmode(), og_slot(), og_path());
+    }
+    static int logged_calls;
+    if (!og_mcp_calls && !logged_calls && get_ms_clock() > 15000)
+    {
+        logged_calls = 1;
+        og_log("PROP_MOVIE_CONTROL_PARAM not delivered (ML core without it?)");
+    }
 }
 
 static void og_step(void)
@@ -950,13 +1015,6 @@ static void og_step(void)
     {
         if (get_ms_clock() - og_ready_shown >= OG_READY_MS) og_ready_shown = 0;
         else if (og_path() != OG_PATH_PHOTO) { og_ready_shown = 0; NotifyBoxHide(); }
-    }
-    static int logged_vmode_changes = -1;
-    if (og_debug && og_vmode_changes != logged_vmode_changes)
-    {
-        logged_vmode_changes = og_vmode_changes;
-        og_log("PROP_VIDEO_MODE #%d (%d calls, len %d): %x %x %x %x (path %x)", og_vmode_changes,
-               og_vmode_calls, og_vmode_len, og_vmode[0], og_vmode[1], og_vmode[2], og_vmode[3], og_path());
     }
     og_handle_lost_locked();
     og_recall_setting();
@@ -984,8 +1042,8 @@ static void og_step(void)
                 const char * wait =
                     og_pending_deferred ? "deferred restore" : og_hdmi ? "HDMI" :
                     !lv ? "no LV" : !og_safe_point() ? "not a safe point" :
-                    !r ? "setting unknown" : og_setting_seq != og_vmode_changes ? "setting changed" :
-                    !og_fps_ok(col) ? "fps" : 0;
+                    !r ? "setting unknown" : og_setting_seq != og_setting_changes ? "setting changed" :
+                    !og_prop_ok(col) ? "movie setting" : 0;
                 static const char * logged_wait;
                 if (wait != logged_wait)
                 {
@@ -1172,6 +1230,7 @@ MODULE_CONFIGS_START()
 MODULE_CONFIGS_END()
 
 MODULE_PROPHANDLERS_START()
-    MODULE_PROPHANDLER(PROP_VIDEO_MODE)
+    MODULE_PROPHANDLER(PROP_MOVIE_CONTROL_PARAM)
+    MODULE_PROPHANDLER(PROP_MOVIE_CROP_MODE)
     MODULE_PROPHANDLER(PROP_HDMI_CHANGE)
 MODULE_PROPHANDLERS_END()
