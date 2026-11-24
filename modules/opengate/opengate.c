@@ -26,6 +26,7 @@
 #include <menu.h>
 #include <patch.h>
 #include <bmp.h>
+#include <config.h>
 
 #include "og_r6_190.h"
 
@@ -41,8 +42,8 @@ extern int mmu_reserve_runtime_pages(uint32_t total_pages, uint32_t total_L2_tab
 
 enum og_state { OG_OFF, OG_ARMED, OG_APPLIED, OG_ACTIVE, OG_REMOVING };
 
-static int og_ui;                       /* menu: the user's choice */
-static int og_debug;                    /* menu: write ML/LOGS/OPENGATE.LOG */
+static int og_ui;                       /* menu: the user's choice (not saved: OFF at boot) */
+static CONFIG_INT("opengate.debug", og_debug, 0);   /* menu: write ML/LOGS/OPENGATE.LOG */
 static volatile int og_state = OG_OFF;
 static const char * og_reason = "";     /* why the last apply was refused or removed */
 
@@ -604,10 +605,13 @@ static void og_setting_lost(const char * why)
 #define OG_VMODE_CMP 3
 static uint32_t og_vmode[OG_VMODE_N];
 static volatile int og_vmode_changes;
+static volatile int og_vmode_calls, og_vmode_len;   /* debug: is the property delivered on R6? */
 
 PROP_HANDLER(PROP_VIDEO_MODE)
 {
     og_in_handler = 1;
+    og_vmode_calls++;
+    og_vmode_len = len;
     int n = MIN(len / 4, OG_VMODE_N);
     int changed = 0;
     for (int i = 0; i < n; i++)
@@ -658,17 +662,25 @@ static int og_fps_ok(int col)
     return r && f == r->fps100;
 }
 
-/* learn the setting from Canon's own (unpatched) movie LV */
+/* learn the setting from Canon's own (unpatched) movie LV. A sample counts only when the
+ * same result is seen OG_STABLE times in a row: while the movie LV starts or stops Canon
+ * shows capture mode 0 and stale slots (log of the first clean-module test) */
+#define OG_STABLE 5
 static void og_observe_setting(void)
 {
-    if (!lv || og_path() != OG_PATH_MOVIE || og_removal_needed()) return;
+    static int cand_bad = -1, cand_col, cand_n;
+    if (!lv || og_path() != OG_PATH_MOVIE || og_removal_needed()) { cand_n = 0; return; }
     int seq = og_vmode_changes;
     int cap = og_capmode(), slot = og_slot(), col = og_rd(OG_TIMING_INFO + 0x24);
+    if (cap == 0) { cand_n = 0; return; }   /* no capture mode: LV starting or stopping */
     int bad = 0;
     if (cap == OG_CAPMODE_4KCROP) bad = 2;
     else if (cap != OG_CAPMODE_4K30 || slot != OG_SLOT_4K30 || !og_rate_of_col(col)) bad = 1;
     else if (!og_fps_ok(col)) bad = 3;
-    if (seq != og_vmode_changes) return;    /* the setting changed while reading: next time */
+    if (seq != og_vmode_changes) { cand_n = 0; return; }   /* the setting changed while reading */
+    if (bad != cand_bad || col != cand_col) { cand_bad = bad; cand_col = col; cand_n = 0; }
+    if (++cand_n < OG_STABLE) return;
+    cand_n = OG_STABLE;
     if (!bad)
     {
         if (og_setting_col != col) og_log("setting: 4K %s", og_rate_of_col(col)->name);
@@ -726,11 +738,12 @@ static void og_check_live(void)
 
 static void og_step(void)
 {
-    static int logged_vmode_changes;
-    if (og_vmode_changes != logged_vmode_changes)
+    static int logged_vmode_changes = -1;
+    if (og_debug && og_vmode_changes != logged_vmode_changes)
     {
         logged_vmode_changes = og_vmode_changes;
-        og_log("PROP_VIDEO_MODE %x %x %x %x (path %x)", og_vmode[0], og_vmode[1], og_vmode[2], og_vmode[3], og_path());
+        og_log("PROP_VIDEO_MODE #%d (%d calls, len %d): %x %x %x %x (path %x)", og_vmode_changes,
+               og_vmode_calls, og_vmode_len, og_vmode[0], og_vmode[1], og_vmode[2], og_vmode[3], og_path());
     }
     og_handle_lost_locked();
     if (og_removed_notice)
@@ -750,11 +763,21 @@ static void og_step(void)
 
         case OG_ARMED:
             if (!og_ui) { og_state = OG_OFF; break; }
-            if (og_pending_deferred || og_hdmi || !og_safe_point() || !lv) break;
             {
                 int col = og_setting_col;   /* read once: the handler may zero it */
                 const struct og_rate * r = og_rate_of_col(col);
-                if (!r || og_setting_seq != og_vmode_changes || !og_fps_ok(col)) break;
+                const char * wait =
+                    og_pending_deferred ? "deferred restore" : og_hdmi ? "HDMI" :
+                    !lv ? "no LV" : !og_safe_point() ? "not a safe point" :
+                    !r ? "setting unknown" : og_setting_seq != og_vmode_changes ? "setting changed" :
+                    !og_fps_ok(col) ? "fps" : 0;
+                static const char * logged_wait;
+                if (wait != logged_wait)
+                {
+                    logged_wait = wait;
+                    if (wait) og_log("waiting: %s (path %x, col %d)", wait, og_path(), col);
+                }
+                if (wait) break;
                 if (!og_alloc_copies()) { og_reason = "Not enough memory"; og_ui = 0; og_state = OG_OFF; break; }
                 if (!og_prepare(r) || !og_commit())
                 {
