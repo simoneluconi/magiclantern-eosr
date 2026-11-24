@@ -442,22 +442,22 @@ static MENU_UPDATE_FUNC(f24_update)
     if (s >= 0) MENU_SET_RINFO("%s%s", s ? "Enable" : "Disable", f24_live() ? ", 24.00" : "");
 
     if (!f24_ui && f24_p5_in())
-        MENU_SET_WARNING(MENU_WARN_INFO, "Turns off in LiveView (not in playback or while recording).");
+        MENU_SET_WARNING(MENU_WARN_INFO, "Turns off in LiveView, outside playback and recording.");
     else if (!f24_ui && f24_row_in())
-        MENU_SET_WARNING(MENU_WARN_ADVICE, "Still 24.00p: set Canon's 24.00p row to Disable, or change the frame rate once.");
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "Still 24.00p: set Canon's 24.00p row to Disable.");
     else if (!f24_ui && f24_why[0])
         MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Refused: %s", f24_why);
     else if (f24_ui && !f24_all_in())
-        MENU_SET_WARNING(MENU_WARN_INFO, "Takes effect in LiveView (not in playback or while recording).");
+        MENU_SET_WARNING(MENU_WARN_INFO, "Takes effect in LiveView, outside playback and recording.");
     else if (f24_ui && f24_live())
-        MENU_SET_WARNING(MENU_WARN_INFO, "24.00p live in 4K UHD (fps index %d, VD %d). FHD stays 23.98p.",
+        MENU_SET_WARNING(MENU_WARN_INFO, "24.00p live in 4K UHD (fps index %d, VD %d).",
                          f24_rd(F24_TIMING_INFO + 0x24), f24_rd(F24_IMGCTRL + 0x10));
     else if (f24_ui && s != 1)
         MENU_SET_WARNING(MENU_WARN_ADVICE, "Set Canon's 24.00p row (Movie rec. quality) to Enable.");
     else if (f24_ui && f24_target())
-        MENU_SET_WARNING(MENU_WARN_ADVICE, "Not live yet: set Canon's 24.00p row to Disable and back to Enable once.");
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "Waiting: set 24.00p to Disable, then Enable again.");
     else if (f24_ui)
-        MENU_SET_WARNING(MENU_WARN_ADVICE, "Acts on 4K UHD 23.98p (NTSC) only; FHD stays 23.98p.");
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "Works in 4K UHD 23.98p (NTSC).");
 }
 
 static struct menu_entry f24_menu[] =
@@ -467,14 +467,14 @@ static struct menu_entry f24_menu[] =
         .priv   = &f24_ui,
         .max    = 1,
         .update = f24_update,
-        .help   = "Canon's 24.00p row in Movie rec. quality; Enable records 4K UHD 23.98p as 24.00p.",
-        .help2  = "4K 23.98p (NTSC) only, FHD stays 23.98p. Untested sensor sync. Not with open gate.",
+        .help   = "True 24.00p in 4K UHD, through Canon's 24.00p row.",
+        .help2  = "Set 4K UHD 23.98p, then 24.00p: Enable in Canon's menu.",
         .children = (struct menu_entry[]) {
             {
                 .name   = "Debug dump",
                 .priv   = &f24_debug,
                 .max    = 1,
-                .help   = "While 24.00p is live: Canon's debug ring to ML/LOGS/F24DM0/1.BIN every 2 s.",
+                .help   = "Canon's debug ring to ML/LOGS/F24DM0/1.BIN, every 2 s.",
             },
             MENU_EOL,
         },

@@ -1414,7 +1414,7 @@ static MENU_UPDATE_FUNC(og_update)
             else if (og_setting_bad == 3)
                 MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Use 4K 25p, 29.97p or 23.98p.");
             else if (og_setting_bad || !og_setting_col)
-                MENU_SET_WARNING(MENU_WARN_ADVICE, "Set Canon movie size to 4K 25p / 29.97p / 23.98p, crop OFF.");
+                MENU_SET_WARNING(MENU_WARN_ADVICE, "Set Canon movie size to 4K 25/29.97/23.98p, crop OFF.");
             else
                 MENU_SET_WARNING(MENU_WARN_ADVICE, "Switch to photo mode once to apply.");
             break;
@@ -1433,8 +1433,8 @@ static struct menu_entry og_menu[] =
         .priv    = &og_ui,
         .max     = 1,
         .update  = og_update,
-        .help    = "Whole sensor (3:2) in 4K: 4096x2736 HEVC 10-bit or H.264, 25p / 29.97p / 23.98p.",
-        .help2   = "Canon: 4K 25/29.97/23.98p, crop OFF; switch to photo mode once. Play clips on a PC.",
+        .help    = "Full sensor height in 4K: 4096x2736, 25/29.97/23.98p.",
+        .help2   = "Set 4K 25/29.97/23.98p, crop OFF; then photo mode once.",
         .submenu_width = 650,
         .children = (struct menu_entry[]) {
             {
