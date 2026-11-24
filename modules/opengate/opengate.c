@@ -719,6 +719,7 @@ static void og_check_live(void)
         {
             og_state = OG_ACTIVE;
             og_log("active: capmode %x slot %d VD %d", cap, slot, vd);
+            NotifyBox(2000, "Open gate ON: 4096x2736 %s", og_rate->name);
         }
         return;
     }
@@ -792,6 +793,7 @@ static void og_step(void)
                 og_bad_samples = 0;
                 og_state = OG_APPLIED;
                 og_log("applied: 4K %s", r->name);
+                NotifyBox(4000, "Open gate ready (4K %s):\nswitch to movie mode.", r->name);
             }
             break;
 
