@@ -967,10 +967,14 @@ static unsigned int og_init(void)
 
 static unsigned int og_deinit(void)
 {
-    /* modules are not unloaded at runtime on this port; remove anyway if possible */
+    /* called at power off: touch nothing. Removing the patches there ran inside the
+     * running movie LV while Canon shut down and hung the power off (run 53). Every
+     * change is in RAM and is rebuilt stock at the next boot. Otherwise remove only at
+     * a safe point. */
+    if (ml_shutdown_requested) return 0;
     if (take_semaphore(og_lock, 1000) == 0)
     {
-        if (og_removal_needed() && !RECORDING) og_remove();
+        if (og_removal_needed() && og_safe_point()) og_remove();
         give_semaphore(og_lock);
     }
     return 0;
