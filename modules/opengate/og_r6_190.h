@@ -61,14 +61,30 @@ static const struct og_cell og_sensor_cells[] =
     { 0x42B8C484, 4, 0x0BB7160F, 0x0EB7160F },
     { 0x42B8C488, 4, 0xD2412B10, 0xD2412B10 },
     { 0x42B8C48C, 4, 0x0BB70000, 0x0EB70000 },
+    /* line time 524 -> 576 ticks (research HD576.md 8; sensor mode 3's full-height 1x1 line
+     * time): CMOS ModeInit 0x041 / 0x043 and DIGIC D2408198 / D240819C = HD - 1 / HD. Canon
+     * rebuilds the sensor window words 0x027-0x02E from the timing cells by itself */
+    { 0x42B83B24, 4, 0x1040020B, 0x1040023F },     /* CMOS ModeInit reg 0x041 = HD - 1 */
+    { 0x42B83B28, 4, 0x10C0020B, 0x10C0023F },     /* CMOS ModeInit reg 0x043 = HD - 1 */
+    { 0x42B8BA00, 4, 0xD2408198, 0xD2408198 },     /* check: D2408198 */
+    { 0x42B8BA04, 4, 0x0000020B, 0x0000023F },     /* D2408198 = HD - 1 */
+    { 0x42B8BA08, 4, 0xD240819C, 0xD240819C },     /* check: D240819C */
+    { 0x42B8BA0C, 4, 0x0000020C, 0x00000240 },     /* D240819C = HD */
 };
+/* the four line-time words above, put back by the property handler if it cannot take the
+ * module lock at a change to a setting the open gate does not support (og_lost): a slot-9
+ * movie mode (4K 50/59.94p) must never start with the HD-576 words on Canon's HD-524 cells */
+static const uint32_t og_hd_words[4] = { 0x42B83B24, 0x42B83B28, 0x42B8BA04, 0x42B8BA0C };
 /* SSG D2408280/90/98 are derived by Canon from ROD: never written (RESULTS run 2). */
 
 /* ---- timing table row 15, the column of the movie fps (FPS25.md 1.2) ----
  * u16 cell = TIMING + off + 15*0x20 + 2*col; cartridge u32 = TIMING + 0x1180 + 15*0x40 + 4*col.
- * Column = Canon's fps index: 2 = 29.97p, 3 = 25p, 4 = 23.98p. 25p = the cells of run 36/37
- * (slot-9 line time HD 524, full-height ROD/RPS); 29.97p FL/RPS are Canon's HD-524 29.97
- * values; 23.98p is derived (FL 2149, RPS = FL - 52). */
+ * Column = Canon's fps index: 2 = 29.97p, 3 = 25p, 4 = 23.98p. Line time HD 576 (21 us),
+ * full-height ROD 1027 (research HD576.md 3, Canon's rules): FL = floor(period / HD), RPS =
+ * floor((period - 1 ms) / HD); 25p takes FL 1874, not 1875 (1875 x 576 is the exact period,
+ * Canon always leaves a positive trim; VD reads 1875). The BUF_A FIFO fills 9 % slower than
+ * at slot 9's own HD 524, which left too little margin at 29.97p (camera session
+ * 2026-11-25-hd576: 3:2 29.97p 3 x 5 min, 4:3 29.97p 3 min, 3:2 23.98p, clean). */
 #define OG_TIMING_TABLE 0x42BAA11C
 #define OG_TCELL(off, col)  (OG_TIMING_TABLE + (off) + 15 * 0x20 + 2 * (col))
 #define OG_TCART(col)       (OG_TIMING_TABLE + 0x1180 + 15 * 0x40 + 4 * (col))
@@ -78,27 +94,27 @@ static const struct og_cell og_sensor_cells[] =
 struct og_rate { uint8_t col; const char * name; uint16_t fl_stock, fl, rps_stock, rps, fps100; };
 static const struct og_rate og_rates[] =
 {
-    { 2, "29.97p", 790, 1719, 766, 1667, 2997 },
-    { 3, "25p",    947, 2061, 923, 2010, 2500 },
-    { 4, "23.98p", 987, 2149, 964, 2097, 2398 },
+    { 2, "29.97p", 790, 1564, 766, 1517, 2997 },
+    { 3, "25p",    947, 1874, 923, 1828, 2500 },
+    { 4, "23.98p", 987, 1955, 964, 1908, 2398 },
 };
 /* SetP (+0x280: the line of the next-frame setup interrupt, evfSetParamInterrupt) and the
- * cartridge (ESync output 2, us) follow Canon's rule for the readout end: SetP = ROD - 208,
- * cartridge = ceil(SetP * HD / 27) + 1000. 627 / 0x3371, the 50p values (readout end 835),
- * started that work inside our longer readout: every BUF_A error logged fell ~4.9 ms after
- * SetP, at VD + 17.07 ms (research BUFA-RINGS.md). With 819 / 0x41FF (camera session
- * 2026-11-25-setp): 4:3 25p IPB 13 min, 3:2 25p IPB 19 min, 3:2 29.97p IPB 9 min, clean */
+ * cartridge (ESync output 2, us) follow Canon's rule for the readout end: SetP = ROD -
+ * round(109,000 / HD), 4.04 ms before the readout end; cartridge = ceil(SetP * HD / 27) +
+ * 1000 us. The 50p values 627 / 0x3371 (readout end 835) started that work inside our longer
+ * readout: every BUF_A error logged then fell ~4.9 ms after SetP, at VD + 17.07 ms (research
+ * BUFA-RINGS.md; fixed with 819 / 0x41FF at HD 524, session 2026-11-25-setp) */
 #define OG_T_SETP_STOCK  655        /* +0x280 */
-#define OG_T_SETP        819
+#define OG_T_SETP        838
 #define OG_T_ROD_STOCK   751        /* +0x500 */
 #define OG_T_ROD         1027
 #define OG_T_HD_STOCK    1140       /* +0xA00, HD ticks */
-#define OG_T_HD          524
-#define OG_T_HDUS_STOCK  42         /* +0xC80, HD us */
-#define OG_T_HDUS        19
+#define OG_T_HD          576
+#define OG_T_HDUS_STOCK  42         /* +0xC80, HD us = floor(HD / 27) */
+#define OG_T_HDUS        21
 #define OG_T_FLAG        1          /* +0xF00, check only */
 #define OG_T_CART_STOCK  0x6FF0
-#define OG_T_CART        0x41FF     /* ceil(819 * 524 / 27) + 1000 us */
+#define OG_T_CART        0x49BE     /* ceil(838 * 576 / 27) + 1000 us */
 
 /* ---- raw ring: MemoryNavigator LV raw entry (type 0x12) of both 4K sub-maps ----
  * {region 5, offset 0, slot 0x16D4DE0, count 3} -> 2 slots of 0x1E70000 (RESULTS run 4) */
@@ -227,7 +243,13 @@ static const struct og_word og_enc_words[] =
     { 0xE03761D8, 0x429A6687, 0x429A66AB, 1, "OG enc ORCA resize height 2736" },
     { 0xE03B713C, 0x900770AA, 0x900770D7, 1, "OG enc B1 codec frame buffer" },
     { 0xE03B7140, 0x7088F04F, 0x70ACF04F, 1, "OG enc B2 codec frame buffer" },
-    { 0xE03B71B8, 0x20089000, 0x20079000, 1, "OG enc B3 buffer from pool 7" },
+    /* B1 stays in pool 8 on DRAM ch5, as stock, not on ch4 with the raw ring / HEAD write.
+     * Room for the larger B1: the four type-8 buffers of pool 8 (literal E03B7320, its only
+     * reader ldr.w sb at E03B714A) 0x273F000 -> 0x256F000, still larger than a whole
+     * uncompressed picture; VCodecApi only checks them non-zero, 64-aligned and equal. Pool 8
+     * 0x0B23C000: 3:2 uses 0x0B09C000, 4:3 exactly 0x0B23C000 (research B1-CH5.md; camera:
+     * B1 at 5:07800000) */
+    { 0xE03B7320, 0x0273F000, 0x0256F000, 0, "OG enc type-8 buffers (B1 in pool 8)" },
     /* HEVC 10-bit UHD rows (audit/enc2736/lrows_check.py): level 5.1/5.2 -> 6.1 for the
      * 4096x2736 picture size; IPB bitrate x 1.267 (= the area ratio), ALL-I unchanged */
     { 0xE1F1E7CC, 52, 61, 0, "OG enc level 30p ALL-I" },

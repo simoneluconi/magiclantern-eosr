@@ -1,10 +1,10 @@
 Open gate 4K
 ============
 
-Records 4K at the full sensor height: 4096x2736 (3:2) at 25p, 29.97p or 23.98p,
-or 3840x2880 (4:3) at 25p.
+Records 4K at the full sensor height: 4096x2736 (3:2) or 3840x2880 (4:3),
+at 25p, 29.97p or 23.98p.
 
-- Set 4K 25p, 29.97p or 23.98p (4:3: 25p), movie crop off.
+- Set 4K 25p, 29.97p or 23.98p, movie crop off.
 - Choose 3:2 or 4:3, go to photo mode once, then back to movie.
 - The entry is OFF after every restart.
 - FHD, 50p or more, crop or Canon Log remove it.

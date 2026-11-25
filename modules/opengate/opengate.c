@@ -63,7 +63,6 @@ enum og_mode { OG_MODE_OFF, OG_MODE_32, OG_MODE_43 };
 static int og_ui;
 static int og_mode;                     /* the mode of the patches in place (set at apply) */
 static const char * const og_mode_size[] = { "", "4096x2736", "3840x2880" };
-#define OG_43_FPS100 2500               /* 4:3: 25p only */
 static CONFIG_INT("opengate.debug", og_debug, 0);   /* menu: write ML/LOGS/OPENGATE.LOG */
 static volatile int og_state = OG_OFF;
 static const char * og_reason = "";     /* why the last apply was refused or removed */
@@ -504,7 +503,6 @@ static int og_prepare(const struct og_rate * r, int mode)
     og_list_error = 0;
     og_prep_mode = mode;
     int m43 = mode == OG_MODE_43;
-    if (m43 && r->fps100 != OG_43_FPS100) FAIL("4:3 is 25p only");
     const struct og_geometry * g = m43 ? &og_geo43 : &og_geo32;
     /* develop rows: the stored rows plus the margin above and below */
     uint32_t vdev = g->vout + 2u * g->vmargin;
@@ -868,12 +866,29 @@ static void og_lost_note(const char * why, int keep)
     og_lost_pending = 1;
 }
 
+/* the four line-time words of slot 9 back to Canon's values, without the lock: only words that
+ * hold ours are written, so the later full removal finds them stock and skips them */
+static void og_hd_words_stock(void)
+{
+    for (int i = 0; i < COUNT(og_sensor_cells); i++)
+        for (int k = 0; k < COUNT(og_hd_words); k++)
+            if (og_sensor_cells[i].addr == og_hd_words[k] && RD32(og_hd_words[k]) == og_sensor_cells[i].val)
+                RD32(og_hd_words[k]) = og_sensor_cells[i].stock;
+}
+
 /* from a property handler (task context): remove at once if possible */
 static void og_lost(const char * why, int keep)
 {
     og_lost_note(why, keep);
     if (RECORDING) return;                          /* the worker removes after the stop */
-    if (take_semaphore(og_lock, 1000) != 0) return; /* the worker removes on its next step */
+    if (take_semaphore(og_lock, 1000) != 0)
+    {
+        /* the worker removes on its next step; if the new setting is one the open gate does
+         * not take (e.g. 4K 50/59.94p, the same sensor slot 9), the line-time words go back
+         * now, so that mode never starts with HD-576 words on its HD-524 cells */
+        if (!keep && og_removal_needed()) og_hd_words_stock();
+        return;
+    }
     og_handle_lost_locked();
     give_semaphore(og_lock);
 }
@@ -924,8 +939,8 @@ static int og_mcp_col(const struct og_mcp * m, const char ** why)
     return col;
 }
 
-/* the same for a mode: 4:3 is 25p only. The mode is the one of the patches in place, or the
- * user's choice while none are */
+/* the same for a mode (both modes take all three rates since the HD 576 line time). The mode
+ * is the one of the patches in place, or the user's choice while none are */
 static int og_mode_now(void)
 {
     return og_removal_needed() ? og_mode : og_ui;
@@ -933,13 +948,7 @@ static int og_mode_now(void)
 
 static int og_mcp_col_mode(const struct og_mcp * m, const char ** why, int mode)
 {
-    int col = og_mcp_col(m, why);
-    if (col && mode == OG_MODE_43 && m->fps100 != OG_43_FPS100)
-    {
-        if (why) *why = "4:3 is 25p only";
-        return 0;
-    }
-    return col;
+    return og_mcp_col(m, why);
 }
 
 /* debug: when each posting comes, relative to Canon's LiveView state (is the setting
@@ -1273,8 +1282,7 @@ static void og_check_live(void)
     int cap = og_capmode(), slot = og_slot(), vd = og_rd(OG_IMGCTRL + 0x10);
     const struct og_rate * live = og_rate_of_col(og_rd(OG_TIMING_INFO + 0x24));
     int ok = cap == OG_CAPMODE_4K30 && slot == OG_SLOT_FULL && live
-          && vd >= live->fl && vd <= live->fl + 2
-          && (og_mode != OG_MODE_43 || live->fps100 == OG_43_FPS100);
+          && vd >= live->fl && vd <= live->fl + 2;
     if (ok)
     {
         if (og_rate != live) og_log("live rate: 4K %s", live->name);
@@ -1291,6 +1299,10 @@ static void og_check_live(void)
             int lc = og_rd(OG_TIMING_INFO + 0x24);
             og_log("timing in effect (col %d): SetP %d, cartridge %x, live cartridge %x",
                    lc, RD16(OG_TCELL(0x280, lc)), RD32(OG_TCART(lc)), og_rd(OG_TIMING_INFO + 0x34));
+            /* line time: the HD cell, Canon's live HD us copy, and the DIGIC timing registers
+             * read back (HD - 1 / HD = 23f / 240; the CMOS side cannot be read back) */
+            og_log("line time: HD cell %d, live HD us %d, D2408198 %x, D240819C %x",
+                   RD16(OG_TCELL(0xA00, lc)), og_rd(OG_TIMING_INFO + 0x30), RD32(0xD2408198), RD32(0xD240819C));
             NotifyBox(2000, "Open gate ON: %s %s", og_mode_size[og_mode], og_rate->name);
         }
         return;
@@ -1457,8 +1469,7 @@ static void og_step(void)
                     !lv ? "no LV" : !og_safe_point() ? "not a safe point" :
                     og_pend_since ? "setting posted" :
                     !r ? "setting unknown" : og_setting_seq != og_setting_changes ? "setting changed" :
-                    !og_prop_ok(col) ? "movie setting" :
-                    og_ui == OG_MODE_43 && r->fps100 != OG_43_FPS100 ? "4:3 needs 25p" : 0;
+                    !og_prop_ok(col) ? "movie setting" : 0;
                 static const char * logged_wait;
                 if (wait != logged_wait)
                 {
@@ -1544,8 +1555,6 @@ static MENU_UPDATE_FUNC(og_update)
             break;
         case OG_ARMED:
         {
-            const struct og_rate * r = og_rate_of_col(og_setting_col);
-            int m43 = og_ui == OG_MODE_43;
             MENU_SET_VALUE("Waiting");
             MENU_SET_RINFO("%s", og_mode_size[og_ui]);
             if (og_hdmi)
@@ -1555,12 +1564,9 @@ static MENU_UPDATE_FUNC(og_update)
             else if (og_setting_bad == 2)
                 MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Turn Canon movie cropping OFF.");
             else if (og_setting_bad == 3)
-                MENU_SET_WARNING(MENU_WARN_NOT_WORKING, m43 ? "Use 4K 25p." : "Use 4K 25p, 29.97p or 23.98p.");
+                MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Use 4K 25p, 29.97p or 23.98p.");
             else if (og_setting_bad || !og_setting_col)
-                MENU_SET_WARNING(MENU_WARN_ADVICE, m43 ? "Set Canon movie size to 4K 25p, crop OFF."
-                                                       : "Set Canon movie size to 4K 25/29.97/23.98p, crop OFF.");
-            else if (m43 && r && r->fps100 != OG_43_FPS100)
-                MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "4:3 is 25p only: set Canon to 4K 25p.");
+                MENU_SET_WARNING(MENU_WARN_ADVICE, "Set Canon movie size to 4K 25/29.97/23.98p, crop OFF.");
             else
                 MENU_SET_WARNING(MENU_WARN_ADVICE, "Switch to photo mode once to apply.");
             break;
@@ -1582,7 +1588,7 @@ static struct menu_entry og_menu[] =
         .choices = CHOICES("OFF", "3:2 4096x2736", "4:3 3840x2880"),
         .update  = og_update,
         .help    = "Full sensor height in 4K: 3:2 4096x2736 or 4:3 3840x2880.",
-        .help2   = "3:2: 25/29.97/23.98p. 4:3: 25p. Crop OFF, photo mode once.",
+        .help2   = "4K 25/29.97/23.98p, crop OFF; then photo mode once.",
         .submenu_width = 650,
         .children = (struct menu_entry[]) {
             {
