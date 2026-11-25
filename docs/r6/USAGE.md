@@ -70,6 +70,14 @@ Only features the R6 does not have already are enabled. Every new option starts 
    - Scripts that change camera settings or take pictures fail, because this build does not allow property writes. Avoid **api_test**: it tests those calls too.
    - Script tasks get at most 32 KiB of stack on the R6.
 
+### Display > Anamorphic
+
+- Shows the image desqueezed for anamorphic lenses: **5:4 (1.25)** to **2:1**. It works on the screen and in the viewfinder, in photo and movie mode, at full resolution and frame rate, also while recording.
+- Canon's display does the stretch itself, and ML's overlays follow the desqueezed image.
+- The change shows when the ML menu closes. A change made while recording applies after the clip.
+- With open gate 4:3 the 4:3 frame is shown desqueezed too.
+- Only the preview changes: pictures, movies and playback stay as recorded. HDMI is not desqueezed.
+
 ### Display > Red display and colour schemes
 
 - **Display > Red display** (OFF / 100 / 50 / 25 / 12 %) turns the whole screen and the viewfinder red, for night and astro use. It affects the display only, not the pictures. The setting is saved.

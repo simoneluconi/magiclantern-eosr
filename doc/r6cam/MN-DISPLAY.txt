@@ -1,6 +1,11 @@
 Display
 ~~~~~~~
 
+Anamorphic
+``````````
+
+Your anamorphic lens desqueezed, **1.25x to 2x**, on the screen and in the viewfinder, also while recording. With open gate 4:3 too. It applies when the menu closes. Pictures and movies don't change.
+
 Red display
 ```````````
 
