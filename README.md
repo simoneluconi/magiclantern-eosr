@@ -16,12 +16,12 @@ fork brings it to the R6, with extra video features.
 
 | | Feature | What you get |
 |---|---|---|
-| 🎞️ | **Open gate 4K** | Record the **whole sensor height**: 4096x2736 in 3:2, or 3840x2880 in 4:3 for anamorphic lenses. HEVC 4:2:2 10-bit with Canon Log, or H.264. 25p, 29.97p, 23.98p. Play the clips on a computer. *Module, experimental.* |
-| 🔭 | **Anamorphic preview** | See your anamorphic lens **desqueezed** on the screen and in the viewfinder, sharp and smooth, also while recording. 1.25x to 2x, with open gate 4:3 too. |
-| 🎬 | **True 24.00p** | Cinema 24.00 fps in 4K UHD, with Canon's own 24.00p setting. *Module, experimental.* |
-| ⏱️ | **Clips up to 59:59** | Record for an hour in one clip, and play it back on the camera. High frame rate (100/120p) up to 29:59. |
-| 🌡️ | **Heat timer 2x / 3x / 4x** | Slows Canon's time-based 4K limit. The real temperature sensors still protect the camera. |
-| 💾 | **Format and keep ML** | Format the card from Canon's menu and ML is put back for you ("Format card, keep ML"). |
+| 🎞️ | **Open&nbsp;gate&nbsp;4K** | Record the **whole sensor height**: 4096x2736 in 3:2, or 3840x2880 in 4:3 for anamorphic lenses. HEVC 4:2:2 10-bit with Canon Log, or H.264. 25p, 29.97p, 23.98p. Play the clips on a computer. *Module, experimental.* |
+| 🔭 | **Anamorphic&nbsp;preview** | See your anamorphic lens **desqueezed** on the screen and in the viewfinder, sharp and smooth, also while recording. 1.25x to 2x, with open gate 4:3 too. |
+| 🎬 | **True&nbsp;24.00p** | Cinema 24.00 fps in 4K UHD, with Canon's own 24.00p setting. *Module, experimental.* |
+| ⏱️ | **Clips&nbsp;up&nbsp;to&nbsp;59:59** | Record for an hour in one clip, and play it back on the camera. High frame rate (100/120p) up to 29:59. |
+| 🌡️ | **Heat&nbsp;timer** | **2x, 3x or 4x**: slows Canon's time-based 4K limit. The real temperature sensors still protect the camera. |
+| 💾 | **Format,&nbsp;keep&nbsp;ML** | Format the card from Canon's menu and ML is put back for you ("Format card, keep ML"). |
 | 🖼️ | **Cropmarks** | Framing guides on the LiveView, including your own bitmaps. |
 
 The modules sit in the **Modules** tab and turn on from the ML menu; open gate and 24.00p are
