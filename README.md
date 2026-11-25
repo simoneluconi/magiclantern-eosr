@@ -1,7 +1,7 @@
 Magic Lantern for the Canon EOS R6
 ==================================
 
-**Open gate 4K, true 24.00p, one-hour clips and more, on the original EOS R6 (firmware 1.9.0).**
+**Open gate 4K in 3:2 and 4:3, true 24.00p, one-hour clips and more, on the original EOS R6 (firmware 1.9.0).**
 
 Magic Lantern (ML) runs next to Canon's firmware, straight from the memory card. This unofficial
 fork brings it to the R6, with extra video features.
@@ -16,7 +16,7 @@ fork brings it to the R6, with extra video features.
 
 | | Feature | What you get |
 |---|---|---|
-| 🎞️ | **Open gate 4K** | Record the **whole sensor height**: 4096x2736, 3:2. Reframe for vertical or square later. HEVC 4:2:2 10-bit with Canon Log, or H.264. 25p, 29.97p, 23.98p. Play the clips on a computer. *Module, experimental.* |
+| 🎞️ | **Open gate 4K** | Record the **whole sensor height**: 4096x2736 in 3:2, or 3840x2880 in 4:3 for anamorphic lenses. HEVC 4:2:2 10-bit with Canon Log, or H.264. 25p, 29.97p, 23.98p. Play the clips on a computer. *Module, experimental.* |
 | 🎬 | **True 24.00p** | Cinema 24.00 fps in 4K UHD, with Canon's own 24.00p setting. *Module, experimental.* |
 | ⏱️ | **Clips up to 59:59** | Record for an hour in one clip, and play it back on the camera. High frame rate (100/120p) up to 29:59. |
 | 🌡️ | **Heat timer 2x / 3x / 4x** | Slows Canon's time-based 4K limit. The real temperature sensors still protect the camera. |
@@ -29,7 +29,8 @@ used one at a time. Their limits are in their own info screen on the camera.
 ### Open gate 4K
 
 The whole sensor height in one frame: frame it once, then crop the same clip for widescreen,
-square and vertical.
+square and vertical. With an anamorphic lens, choose 4:3: 3840x2880 from the full sensor height,
+ready to desqueeze in post.
 
 <p align="center"><img src="docs/r6/img/open-gate-frame.jpg" alt="An open gate 4K frame from the R6, 4096x2736, with 16:9, 1:1 and 9:16 framings inside it" width="800"><br>
 <em>One open gate frame from the R6: 4096x2736, with room for 16:9, 1:1 and 9:16.</em></p>

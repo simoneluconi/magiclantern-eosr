@@ -18,4 +18,4 @@ Open gate 4K and 24.00p
 
     \helplabel{24.00p (Canon row)}
 
-From the modules **opengate** (4096x2736, the whole sensor) and **fps24** (true 24.00p in 4K UHD). One at a time.
+From the modules **opengate** (the whole sensor height: 4096x2736 in 3:2, or 3840x2880 in 4:3 for anamorphic lenses) and **fps24** (true 24.00p in 4K UHD). One at a time.

@@ -41,7 +41,7 @@ Only features the R6 does not have already are enabled. Every new option starts 
 
 ### Movie > Open gate 4K and 24.00p
 
-- From the modules **opengate** (4096x2736, the whole sensor height) and **fps24** (true 24.00p in 4K UHD). Load them in the **Modules** tab, then turn the entry on in the Movie menu. One at a time.
+- From the modules **opengate** (the whole sensor height: 4096x2736 in 3:2, or 3840x2880 in 4:3 for anamorphic lenses; 25p, 29.97p, 23.98p) and **fps24** (true 24.00p in 4K UHD). Load them in the **Modules** tab, then turn the entry on in the Movie menu. One at a time.
 - How to set the camera for each one is on its info screen: select the module in the **Modules** tab and press **Q**.
 
 ### Overlay > Cropmarks
