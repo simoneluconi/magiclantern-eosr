@@ -271,6 +271,14 @@ void refresh_yuv_from_rgb(void)
         return;
     }
 
+    // convert only whole frames: drawing done under BMP_LOCK (menu,
+    // overlays) is either finished or waits until the conversion is done
+    AcquireRecursiveLock(bmp_lock, 0);
+
+    // clear it before converting: drawing done meanwhile (other tasks)
+    // sets it again, so it gets converted on the next refresh
+    ml_refresh_display_needed = 0;
+
     // Not on DIGIC X without a dedicated layer: there we draw into Canon's
     // GUI layer (BMP_LAYER_WIDTH pitch), so a linear copy of BMP_VRAM_SIZE
     // pixels would garble Canon's whole OSD in the top rows of that layer.
@@ -292,10 +300,10 @@ void refresh_yuv_from_rgb(void)
         // Shall we use per-camera constants in bmp.c? Or maybe get this at runtime
         // from Ximr / XCM?
         //
-        // Under bmp_lock, as clrscr(): a pass that is half-way through must
-        // not put back pixels that clrscr() has just erased, and
-        // canon_gui_repaint() must not start while ML writes to the layer.
-        AcquireRecursiveLock(bmp_lock, 0);
+        // Under bmp_lock (taken above for the whole conversion), as
+        // clrscr(): a pass that is half-way through must not put back pixels
+        // that clrscr() has just erased, and canon_gui_repaint() must not
+        // start while ML writes to the layer.
         #ifdef CONFIG_CANON_GUI_REPAINT
         if (canon_gui_repaint_blocks_refresh())
         {
@@ -332,7 +340,6 @@ void refresh_yuv_from_rgb(void)
             }
             rgb_row = rgb_row + BMP_LAYER_WIDTH;
         }
-        ReleaseRecursiveLock(bmp_lock);
 #else
         //SJE FIXME benchmark this loop, it probably wants optimising
         for (size_t n = 0; n < BMP_VRAM_SIZE; n++)
@@ -352,6 +359,8 @@ void refresh_yuv_from_rgb(void)
     }
 #endif
 
+    ReleaseRecursiveLock(bmp_lock);
+
     // trigger Ximr to render to OSD from RGB buffer
 #ifdef CONFIG_DIGIC_VI
     XimrExe((void *)XIMR_CONTEXT);
@@ -367,7 +376,6 @@ void refresh_yuv_from_rgb(void)
     XimrExe((void *)XIMR_CONTEXT);
     give_semaphore(winsys_sem);
 #endif
-    ml_refresh_display_needed = 0;
 }
 
 void rgba_buffer_clear()
@@ -1470,6 +1478,7 @@ int bfnt_draw_char(int c, int px, int py, int fg, int bg)
         }
         ptr += bb;
     }
+    ml_refresh_display_needed = 1;
     return crw;
 }
 
