@@ -84,37 +84,45 @@
 #define DISP_IMG_W    0x2C
 #define DISP_IMG_H    0x30
 
-/* The layouts we map: Canon's image on the panel (as in the BlackBelt
- * table, lookup 0xE080BEC4, and seen on camera), and where ML's 3:2 LV
- * area (720x480, full width) starts, with the 16:9 bars inside it that the
- * movie image leaves (ML's os.off_169; the FaceYuv image is only the part
+/* The layout we map: Canon's image on the panel (its window record, the
+ * BlackBelt table, lookup 0xE080BEC4; seen on camera), and where ML's 3:2
+ * LV area (720x480, full width) starts, with the bands above and below the
+ * image inside it (ML's os.off_169; the FaceYuv image is only the part
  * between them).
- * LCD: 900x600 panel = ML's 720x480 (0.8 ML rows per panel row).
- * EVF: 1280x960 panel, ML's 720x480 on its middle 1280x854 band (rows
+ * LCD: 900x600 area = ML's 720x480 (0.8 ML rows per panel row).
+ * EVF: 1280x960 panel, ML's 720x480 on its middle 1280x854 area (rows
  * 53..906, 480 / 854 ML rows per panel row), so the 3:2 area at the
  * panel's top starts at ML row -30.
- * Movie: LCD image rows 47..552 -> ML 37.6..442.4, i.e. 38..441 (bars of
- * 38 rows); EVF rows 67..786 -> ML 7.9..412.6, i.e. 38 rows below -30. */
+ * Any full-width image centred in the area is taken: the photo image (whole
+ * area), the movie image (LCD rows 47..552 -> ML 37.6..442.4, i.e. bands of
+ * 38 rows; EVF rows 67..786 -> 38 rows below -30), and the smaller ones of
+ * Display > Anamorphic (CONFIG_LV_DISPLAY_WINDOW). A pillarboxed image
+ * (x != 0, open gate 4:3) is not mapped. */
 struct fy_layout
 {
     uint16_t fy_w, fy_h;            /* FaceYuv size (FY_SIZE) */
     uint16_t out;                   /* DISP_LCD or DISP_EVF */
     uint16_t img_w, img_h, img_y;   /* Canon's image on the panel, at x = 0 */
     int16_t  y0;                    /* ML row of the 3:2 area's top */
-    int16_t  off_169;               /* 16:9 bars, ML rows each */
+    int16_t  off_169;               /* bands above / below the image, ML rows each */
 };
 
-static const struct fy_layout fy_layouts[] = {
-    /* photo mode (3:2) */
-    { 640, 426, DISP_LCD,  900, 600,  0,   0,  0 },
-    { 640, 426, DISP_EVF, 1280, 854,  0, -30,  0 },
-    /* movie mode (16:9) */
-    { 640, 360, DISP_LCD,  900, 506, 47,   0, 38 },
-    { 640, 360, DISP_EVF, 1280, 720, 67, -30, 38 },
+/* ML's 3:2 area on each output: panel width and height, ML row of its top */
+struct fy_area { uint16_t out, w, h; int16_t y0; };
+static const struct fy_area fy_areas[] = {
+    { DISP_LCD,  900, 600,   0 },
+    { DISP_EVF, 1280, 854, -30 },
 };
 
-/* the layout vram.c is set up for (faceyuv_lv_geometry) */
-static const struct fy_layout * volatile fy_layout = &fy_layouts[0];
+/* the FaceYuv sizes we read: photo mode (3:2) and movie mode (16:9) */
+static const uint32_t fy_sizes[] = { (426 << 16) | 640, (360 << 16) | 640 };
+
+/* the layout vram.c is set up for (faceyuv_lv_geometry): one of two slots,
+ * switched as a whole, so a reader never sees half of a change */
+static struct fy_layout fy_slots[2] = {
+    { 640, 426, DISP_LCD, 900, 600, 0, 0, 0 },
+};
+static const struct fy_layout * volatile fy_layout = &fy_slots[0];
 
 #define RD(a) (*(volatile uint32_t *)(a))
 
@@ -243,19 +251,43 @@ static int disp_image(int evf, uint32_t * w, uint32_t * h, uint32_t * x, uint32_
     return 0;
 }
 
-/* the layout for this output and FaceYuv size, or NULL (HDMI, an image
- * not in the table, no live slot) */
-static const struct fy_layout * fy_find_layout(uint32_t out, uint32_t size)
+/* the layout for this output and FaceYuv size into *l: 1, or 0 (HDMI, a
+ * FaceYuv size we don't read, an image not full width or not centred, no
+ * live slot) */
+static int fy_find_layout(uint32_t out, uint32_t size, struct fy_layout * l)
 {
-    for (int i = 0; i < COUNT(fy_layouts); i++)
+    int known = 0;
+    for (int i = 0; i < COUNT(fy_sizes); i++)
+        if (size == fy_sizes[i]) known = 1;
+    if (!known) return 0;
+    for (int i = 0; i < COUNT(fy_areas); i++)
     {
-        const struct fy_layout * l = &fy_layouts[i];
-        if (l->out != out || size != (((uint32_t) l->fy_h << 16) | l->fy_w)) continue;
+        const struct fy_area * a = &fy_areas[i];
+        if (a->out != out) continue;
         uint32_t w, h, x, y;
-        if (!disp_image(out == DISP_EVF, &w, &h, &x, &y)) return NULL;
-        return (w == l->img_w && h == l->img_h && x == 0 && y == l->img_y) ? l : NULL;
+        if (!disp_image(out == DISP_EVF, &w, &h, &x, &y)) return 0;
+        if (x != 0 || w != a->w || h < 2 || h > a->h || y > a->h) return 0;
+        int d = (int) a->h - (int) h - 2 * (int) y;
+        if (d < -1 || d > 1) return 0;
+        l->fy_w = size & 0xFFFF;
+        l->fy_h = size >> 16;
+        l->out = out;
+        l->img_w = w;
+        l->img_h = h;
+        l->img_y = y;
+        l->y0 = a->y0;
+        /* the band in ML rows, rounded up: no overlay row outside the image */
+        l->off_169 = (y * 480 + a->h - 1) / a->h;
+        return 1;
     }
-    return NULL;
+    return 0;
+}
+
+static int fy_layout_same(const struct fy_layout * a, const struct fy_layout * b)
+{
+    return a->fy_w == b->fy_w && a->fy_h == b->fy_h && a->out == b->out
+        && a->img_w == b->img_w && a->img_h == b->img_h && a->img_y == b->img_y
+        && a->y0 == b->y0 && a->off_169 == b->off_169;
 }
 
 /* display outputs, or 0 if not known yet */
@@ -295,14 +327,17 @@ void * faceyuv_lv_buffer(void)
     uint32_t outputs = disp_outputs();
     if (outputs != DISP_LCD && outputs != DISP_EVF) return NULL;
 
-    /* photo (3:2) or movie (16:9) image, on a screen layout we know */
-    const struct fy_layout * l = fy_find_layout(outputs, RD(FY_SIZE));
-    if (!l) return NULL;
-    if (l != fy_layout)
+    /* photo (3:2) or movie (16:9) image, on a screen layout we can map */
+    struct fy_layout found;
+    if (!fy_find_layout(outputs, RD(FY_SIZE), &found)) return NULL;
+    const struct fy_layout * l = fy_layout;
+    if (!fy_layout_same(&found, l))
     {
         /* vram_lv and os follow (src/vram.c, on the next
          * get_yuv422_vram); this frame is not used */
-        fy_layout = l;
+        struct fy_layout * next = (l == &fy_slots[0]) ? &fy_slots[1] : &fy_slots[0];
+        *next = found;
+        fy_layout = next;
         vram_params_set_dirty();
         frame_seen = 0;
         return NULL;

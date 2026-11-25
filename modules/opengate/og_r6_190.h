@@ -334,8 +334,9 @@ static const struct og_word og_enc43_words[] =
 
 /* 4:3: LCD / EVF window records (.data 0x245C8, 0x30 B: panel W,H; VRAM W,H; area W,H; window
  * W,H; x,y in area; x,y in VRAM). ORCA sizes the resizer output from the AREA and the display
- * places it at the VRAM x,y: the 4:3 records 2 / 0xC have the 4:3 window with the 3:2 area, so
- * the area width becomes the window width (og43-L2b) */
+ * places it at the VRAM x,y: the 4:3 records 2 / 0xC have the 4:3 window with the 3:2 area
+ * (og43-L2b: area W = window W gave the pillarboxed 4:3 picture). The core writes them
+ * (lv_display_window_set_frame, CONFIG_LV_DISPLAY_WINDOW); their stock values are checked here */
 #define OG_WIN_RECS         0x245C8
 #define OG_WIN_LCD43        (OG_WIN_RECS + 0x30 * 0x2)
 #define OG_WIN_EVF43        (OG_WIN_RECS + 0x30 * 0xC)
