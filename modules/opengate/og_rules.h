@@ -96,6 +96,46 @@ static void og_scale_write(uint8_t * pipe, const struct og_scale * s)
     *(uint32_t *) (pipe + 0x944) = s->recip;
 }
 
+/* horizontal scale block of one pipe (ANAMORPHIC-43.md 2.2): fitted on Canon's 4K30 (4096) and
+ * 4K60 (4552) records, Hin 5472, input band B0_H 1376; reproduces every H word of both.
+ * u16 +0x8E8 / +0x8EC output bands, +0x8F8 start remainder, +0x90C / +0x910 last-band phase,
+ * +0x930 / +0x934 step, +0x938 2^27/Hout (pipe 0 offsets; pipe 1 = +0x60) */
+struct og_hscale { uint16_t n1, n2; uint32_t start_r, phase_i, phase_r, step_i, step_r, recip; };
+
+static struct og_hscale og_hscale_rule(uint32_t hin, uint32_t hout, uint32_t b0)
+{
+    struct og_hscale s;
+    uint32_t n1 = (b0 * hout + hin * 4) / (hin * 8) * 8;     /* B0_H * Hout / Hin, nearest multiple of 8 */
+    uint32_t two_out = 2 * hout, P = 2 * (hin - hout) + 4 * hin * n1;
+    s.n1 = n1; s.n2 = hout / 2 - n1;
+    s.start_r = 2 * (hin - hout);
+    s.phase_i = P / two_out - 2 * (b0 - 6); s.phase_r = P % two_out;
+    s.step_i = (4 * hin) / two_out; s.step_r = (4 * hin) % two_out;
+    s.recip = ((1u << 27) + hout / 2) / hout;
+    return s;
+}
+
+static int og_hscale_matches(const uint8_t * pipe, const struct og_hscale * s)
+{
+    return *(uint16_t *) (pipe + 0x8E8) == s->n1 && *(uint16_t *) (pipe + 0x8EC) == s->n2
+        && *(uint32_t *) (pipe + 0x8F8) == s->start_r
+        && *(uint32_t *) (pipe + 0x90C) == s->phase_i && *(uint32_t *) (pipe + 0x910) == s->phase_r
+        && *(uint32_t *) (pipe + 0x930) == s->step_i && *(uint32_t *) (pipe + 0x934) == s->step_r
+        && *(uint32_t *) (pipe + 0x938) == s->recip;
+}
+
+static void og_hscale_write(uint8_t * pipe, const struct og_hscale * s)
+{
+    *(uint16_t *) (pipe + 0x8E8) = s->n1;
+    *(uint16_t *) (pipe + 0x8EC) = s->n2;
+    *(uint32_t *) (pipe + 0x8F8) = s->start_r;
+    *(uint32_t *) (pipe + 0x90C) = s->phase_i;
+    *(uint32_t *) (pipe + 0x910) = s->phase_r;
+    *(uint32_t *) (pipe + 0x930) = s->step_i;
+    *(uint32_t *) (pipe + 0x934) = s->step_r;
+    *(uint32_t *) (pipe + 0x938) = s->recip;
+}
+
 static uint32_t og_gcd(uint32_t a, uint32_t b)
 {
     while (b) { uint32_t t = a % b; a = b; b = t; }
