@@ -14,7 +14,7 @@ There are three steps:
 - For step 1: an **SDHC card of 32 GB or less**. It can be an old, slow card.
 - For step 2: any SD card. A 256 GB exFAT SDXC card was used in testing.
 - A PC with a card reader, Python 3, and administrator (Windows) or root (Linux) rights.
-- The ML build, `magiclantern.zip` (contains `autoexec.bin` and the `ML/` folder).
+- The ML build: the zip from the **[latest release](https://github.com/simoneluconi/magiclantern-eosr/releases/latest)**. It contains `autoexec.bin` and the `ML/` folder.
 
 ## About card flags
 
@@ -77,7 +77,7 @@ Do the same procedure with an `extend.m` that calls only `DisableBootDisk()`, us
 Any card works for ML itself, in **slot 1 or 2**, FAT32 or exFAT.
 
 1. Format the card **in the camera**. Cards larger than 32 GB become exFAT.
-2. Unzip `magiclantern.zip` to the **card root**. You should end up with `autoexec.bin` and the `ML/` folder next to `DCIM`.
+2. Unzip the release zip to the **card root**. You should end up with `autoexec.bin` and the `ML/` folder next to `DCIM`.
 3. **On Windows, flush and eject before anything else.** Use "Safely remove hardware" and wait until Windows says the card can be removed. In testing, pulling a card without this lost data that hadn't been written yet. That corrupted the exFAT filesystem, deleted files, and the damaged card then hung the camera at boot.
 4. Set `EOS_DEVELOP` and `BOOTDISK`:
    - Linux: unmount the card, run `sudo python3 edit_card_flags.py --eos-develop --bootdisk /dev/sdX1`, then `sync`.

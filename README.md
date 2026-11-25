@@ -68,8 +68,9 @@ ML refuses to start.
 
 1. **Turn on the boot flag**, once, with the script in [`tools/r6/bootflag-enable/`](tools/r6/bootflag-enable/)
    (an SDHC card of 32 GB or less, in slot 2).
-2. **Prepare the card**: format it in the camera, unzip `magiclantern.zip` to it, and set the card
-   flags with the tools in [`tools/r6/`](tools/r6/).
+2. **Prepare the card**: format it in the camera, unzip the zip from the
+   **[latest release](https://github.com/simoneluconi/magiclantern-eosr/releases/latest)** to it, and set
+   the card flags with the tools in [`tools/r6/`](tools/r6/).
 3. **Power on** and press the **Trash** button: that's the ML menu.
 
 The full walkthrough is in [INSTALL](docs/r6/INSTALL.md).
