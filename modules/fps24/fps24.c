@@ -388,12 +388,12 @@ static void f24_hint(void)
     int s = f24_stored();
     if (s == 1 && f24_target() && !f24_live())
         NotifyBox(8000, "24.00p ready.\n"
-                        "Canon's 24.00p row is already Enable:\n"
+                        "Canon's 24.00p is already Enable:\n"
                         "set it to Disable, then Enable again\n"
                         "(Movie rec. quality).");
     else if (s == 0)
         NotifyBox(5000, "24.00p ready.\n"
-                        "Set Canon's 24.00p row to Enable\n"
+                        "Set Canon's 24.00p to Enable\n"
                         "(Movie rec. quality), 4K UHD 23.98p.");
 }
 
@@ -423,7 +423,7 @@ static void f24_task(void * unused)
             f24_remove(F24_G_P5, F24_G_P5);
             if (f24_live())
                 NotifyBox(8000, "24.00p OFF. To get 23.98p back now:\n"
-                                "set Canon's 24.00p row to Disable,\n"
+                                "set Canon's 24.00p to Disable,\n"
                                 "or change the frame rate once and back.");
         }
         else if (!f24_ui && f24_row_in() && !f24_live())
@@ -446,7 +446,7 @@ static MENU_UPDATE_FUNC(f24_update)
     if (!f24_ui && f24_p5_in())
         MENU_SET_WARNING(MENU_WARN_INFO, "Turns off in LiveView, outside playback and REC.");
     else if (!f24_ui && f24_row_in())
-        MENU_SET_WARNING(MENU_WARN_ADVICE, "Still 24.00p: set Canon's 24.00p row to Disable.");
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "Still 24.00p: set Canon's 24.00p to Disable.");
     else if (!f24_ui && f24_why[0])
         MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Refused: %s", f24_why);
     else if (f24_ui && !f24_all_in())
@@ -455,9 +455,9 @@ static MENU_UPDATE_FUNC(f24_update)
         MENU_SET_WARNING(MENU_WARN_INFO, "24.00p live in 4K UHD (fps index %d, VD %d).",
                          f24_rd(F24_TIMING_INFO + 0x24), f24_rd(F24_IMGCTRL + 0x10));
     else if (f24_ui && s != 1)
-        MENU_SET_WARNING(MENU_WARN_ADVICE, "Set Canon's 24.00p row to Enable.");
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "Set Canon's 24.00p to Enable.");
     else if (f24_ui && f24_target())
-        MENU_SET_WARNING(MENU_WARN_ADVICE, "Waiting: set the row to Disable, then Enable.");
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "Waiting: set Canon's 24.00p to Disable, then Enable.");
     else if (f24_ui)
         MENU_SET_WARNING(MENU_WARN_ADVICE, "Works in 4K UHD 23.98p (NTSC).");
 }
@@ -465,12 +465,12 @@ static MENU_UPDATE_FUNC(f24_update)
 static struct menu_entry f24_menu[] =
 {
     {
-        .name   = "24.00p (Canon row)",
+        .name   = "24.00p",
         .priv   = &f24_ui,
         .max    = 1,
         .update = f24_update,
         .help   = "True 24.00p in 4K UHD. Set 4K UHD 23.98p first,",
-        .help2  = "then Canon's 24.00p row (Movie rec. quality): Enable.",
+        .help2  = "then Canon's 24.00p (Movie rec. quality): Enable.",
         .children = (struct menu_entry[]) {
             {
                 .name   = "Debug dump",
