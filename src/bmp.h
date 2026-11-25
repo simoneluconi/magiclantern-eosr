@@ -653,4 +653,9 @@ uint8_t* get_bvram_mirror();
 /* todo: remove it and refactor display filters so zebra overlays read directly from filtered buffer */
 extern int anamorphic_squeeze_bmp_y(int y);
 
+/* tweaks.c, CONFIG_LV_DISPLAY_WINDOW: a module that changes the recorded
+ * frame (e.g. opengate 4:3) gives its aspect for the display window,
+ * (0, 0) when it is removed; 1 = written */
+extern int lv_display_window_set_frame(int num, int den);
+
 #endif //#ifndef _bmp_h_

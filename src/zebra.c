@@ -111,7 +111,13 @@ int FAST get_y_skip_offset_for_overlays()
 
     // in liveview, try not to overlap top and bottom bars
     int off = 0;
+    #ifdef CONFIG_FACEYUV_LV
+    /* the LV image is only the band between os.off_169 bars, in photo mode
+     * too (e.g. Display > Anamorphic); 0 when it fills the area */
+    off = os.off_169;
+    #else
     if (lv && is_movie_mode() && video_mode_resolution <= 1) off = os.off_169;
+    #endif
     int t = get_ml_topbar_pos();
     int b = get_ml_bottombar_pos();
     int mid = os.y0 + (os.y_ex >> 1);
@@ -128,7 +134,11 @@ int FAST get_y_skip_offset_for_histogram()
 
     // in liveview, try not to overlap top and bottom bars
     int off = 0;
+    #ifdef CONFIG_FACEYUV_LV
+    off = os.off_169;       /* as get_y_skip_offset_for_overlays */
+    #else
     if (lv && is_movie_mode() && video_mode_resolution <= 1) off = os.off_169;
+    #endif
     return off;
 }
 

@@ -207,6 +207,19 @@ extern int lv_display_is_evf(void);     /* faceyuv.c: the EVF alone is on */
 /* ML's LV image instead: Canon's FaceYuv buffer, the whole frame; its size
  * follows the LV mode (CONFIG_FACEYUV_LV, faceyuv.c) */
 
+/* CONFIG_LV_DISPLAY_WINDOW: Canon's LCD / EVF window records, .data
+ * 0x245C8 (ROM image 0xE1FDEE78), 0x30 bytes each: panel w,h; VRAM w,h;
+ * area w,h (the box the resizer fills); visible w,h; visible offset x,y in
+ * the area; position x,y in the VRAM. Lookup 0xE080BEC4 (key dev << 12 |
+ * sub << 8 | mode << 4 | aspect) returns a pointer into it, read at each
+ * display setup. Records: 0x0 LCD 3:2, 0x4 LCD movie, 0xA EVF 3:2, 0xE EVF
+ * movie (all with area = visible); 0x2 / 0xC LCD / EVF display aspect 2,
+ * the stills 4:3 view, which opengate 4:3 selects for its frame. */
+#define LV_DISP_WIN_TABLE         0x245C8
+#define LV_DISP_WIN_ROM           0xE1FDEE78
+#define LV_DISP_WIN_RECORDS       { 0x0, 0x4, 0xA, 0xE }
+#define LV_DISP_WIN_FRAME_RECORDS { 0x2, 0xC }
+
 /* WRONG! */
 #define HALFSHUTTER_PRESSED         0
 

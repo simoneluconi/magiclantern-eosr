@@ -62,6 +62,10 @@
 // IMGPLAY_ZOOM_LEVEL_ADDR, still unknown on R6 (consts.h).
 #define FEATURE_CROPMARKS
 
+// Display > Anamorphic: Canon's display resizer desqueezes the LV image
+// (CONFIG_LV_DISPLAY_WINDOW in internals.h); ML's overlays follow it.
+#define FEATURE_ANAMORPHIC_PREVIEW
+
 // Shoot > Motion Detect (not native on R6). Reads the FaceYuv image, so it
 // only detects in LV with the LCD or the EVF alone; takes pictures
 // with lens_take_picture(), i.e. SW1 / SW2 through Canon's shutter switch

@@ -960,6 +960,10 @@ static void play_zoom_center_pos_update()
 
 #endif // FEATURE_QUICK_ZOOM
 
+#if defined(FEATURE_ANAMORPHIC_PREVIEW) && defined(CONFIG_LV_DISPLAY_WINDOW)
+static void lv_win_step(void);
+#endif
+
 static void
 tweak_task( void* unused)
 {
@@ -978,6 +982,10 @@ tweak_task( void* unused)
         
         extern void movtweak_step();
         movtweak_step();
+
+        #if defined(FEATURE_ANAMORPHIC_PREVIEW) && defined(CONFIG_LV_DISPLAY_WINDOW)
+        lv_win_step();
+        #endif
 
         #ifdef FEATURE_ZOOM_TRICK_5D3 // not reliable
         zoom_trick_step();
@@ -3169,6 +3177,15 @@ static MENU_UPDATE_FUNC(anamorphic_preview_display)
 }
 
 
+#ifndef CONFIG_DISPLAY_FILTERS
+/* CONFIG_LV_DISPLAY_WINDOW: Canon's display resizer draws the image already
+ * desqueezed, and ML's LV image geometry (vram.c) follows the window Canon
+ * shows, so nothing is squeezed here */
+int FAST anamorphic_squeeze_bmp_y(int y)
+{
+    return y;
+}
+#else
 // for focus peaking (exception, since it doesn't operate on squeezed LV buffer, but on unsqeezed HD one
 // so... we'll try to squeeze the bitmap coords for output
 static int16_t anamorphic_bmp_y_lut[480];
@@ -3243,7 +3260,166 @@ static void FAST anamorphic_squeeze()
             memset(&dst_buf[LV(0,y)/4], 0, 720*2);
     }
 }
-#endif
+#endif /* CONFIG_DISPLAY_FILTERS */
+
+#ifdef CONFIG_LV_DISPLAY_WINDOW
+/* Anamorphic preview without a display filter: the LCD / EVF image window is
+ * a RAM record that Canon reads at each display setup (consts.h,
+ * LV_DISP_WIN_*). The image box is resized to the frame aspect times the
+ * squeeze, centred in the area, so the display resizer itself shows the
+ * image desqueezed (full resolution and frame rate, no CPU cost).
+ * Canon's own full-image records (area = window, offset 0, position in the
+ * VRAM) give the layout; ratio 1 gives the stock record back. Written only
+ * while LV is stopped (menus, mode changes), never while recording; the
+ * values are checked against the ROM image of the table before the first
+ * write, and a record that holds neither the stock values nor ours is left
+ * alone. */
+struct lv_disp_win
+{
+    uint32_t panel_w, panel_h, buf_w, buf_h;
+    uint32_t area_w, area_h;        /* the box the resizer fills */
+    uint32_t win_w, win_h;          /* the visible part of it */
+    uint32_t off_x, off_y;          /* the visible part's offset in the area */
+    uint32_t pos_x, pos_y;          /* its position in the VRAM */
+};
+
+static const uint8_t lv_win_ids[] = LV_DISP_WIN_RECORDS;
+static const uint8_t lv_win_frame_ids[] = LV_DISP_WIN_FRAME_RECORDS;
+#define LV_WIN_N (COUNT(lv_win_ids) + COUNT(lv_win_frame_ids))
+
+static struct lv_disp_win lv_win_ours[LV_WIN_N];   /* last values written */
+static int lv_win_state;            /* 0 not checked, 1 stock checked, -1 unknown table */
+static int lv_win_applied = -1;     /* anamorphic_preview written, -1 nothing yet */
+static int lv_win_frame_num, lv_win_frame_den;      /* module frame (0 = none) */
+static int lv_win_frame_applied;    /* frame aspect written (num << 16 | den) */
+
+static int lv_win_id(int i)
+{
+    return i < COUNT(lv_win_ids) ? lv_win_ids[i] : lv_win_frame_ids[i - COUNT(lv_win_ids)];
+}
+
+static volatile struct lv_disp_win * lv_win_ram(int i)
+{
+    return (volatile struct lv_disp_win *) (LV_DISP_WIN_TABLE + sizeof(struct lv_disp_win) * lv_win_id(i));
+}
+
+static const struct lv_disp_win * lv_win_rom(int i)
+{
+    return (const struct lv_disp_win *) (LV_DISP_WIN_ROM + sizeof(struct lv_disp_win) * lv_win_id(i));
+}
+
+static int lv_win_equal(volatile struct lv_disp_win * a, const struct lv_disp_win * b)
+{
+    const volatile uint32_t * x = (const volatile uint32_t *) a;
+    const uint32_t * y = (const uint32_t *) b;
+    for (int k = 0; k < (int) (sizeof(*b) / 4); k++)
+        if (x[k] != y[k]) return 0;
+    return 1;
+}
+
+/* the record for a frame aspect fn:fd (0: the stock image's own) and a squeeze rn:rd */
+static void lv_win_layout(const struct lv_disp_win * s, int fn, int fd, int rn, int rd, struct lv_disp_win * r)
+{
+    *r = *s;
+    int an = (fn ? fn : (int) s->area_w) * rn;
+    int ad = (fd ? fd : (int) s->area_h) * rd;
+    int aw = MIN(s->panel_w, s->buf_w), ah = MIN(s->panel_h, s->buf_h);
+    int w = aw, h = (aw * ad + an / 2) / an;
+    if (h > ah) { h = ah; w = (ah * an + ad / 2) / ad; }
+    w &= ~3; h &= ~1;
+    r->area_w = r->win_w = w;
+    r->area_h = r->win_h = h;
+    r->off_x = r->off_y = 0;
+    r->pos_x = (aw - w) / 2;
+    r->pos_y = (ah - h) / 2;
+}
+
+static void lv_win_write(int i, const struct lv_disp_win * v)
+{
+    volatile struct lv_disp_win * r = lv_win_ram(i);
+    if (lv_win_equal(r, v)) { lv_win_ours[i] = *v; return; }
+    /* someone else's values: leave them */
+    if (!lv_win_equal(r, lv_win_rom(i)) && !lv_win_equal(r, &lv_win_ours[i])) return;
+    volatile uint32_t * x = (volatile uint32_t *) r;
+    const uint32_t * y = (const uint32_t *) v;
+    for (int k = 0; k < (int) (sizeof(*v) / 4); k++) x[k] = y[k];
+    lv_win_ours[i] = *v;
+}
+
+static int lv_win_check(void)
+{
+    if (lv_win_state) return lv_win_state > 0;
+    for (int i = 0; i < LV_WIN_N; i++)
+    {
+        if (!lv_win_equal(lv_win_ram(i), lv_win_rom(i)))
+        {
+            lv_win_state = -1;
+            printf("[anamorphic] window record %x not stock, not used\n", lv_win_id(i));
+            return 0;
+        }
+        lv_win_ours[i] = *lv_win_rom(i);
+    }
+    lv_win_state = 1;
+    return 1;
+}
+
+static void lv_win_update(void)
+{
+    if (!lv_win_check()) return;
+    int want = anamorphic_preview;
+    int rn = want ? anamorphic_ratio_num[want - 1] : 1;
+    int rd = want ? anamorphic_ratio_den[want - 1] : 1;
+    /* tweak_task and a module (lv_display_window_set_frame) may both get
+     * here: one whole update at a time, so the last request is the one left
+     * in the records (a few hundred cycles, no call that can block) */
+    uint32_t old = cli();
+    int fn = lv_win_frame_num, fd = lv_win_frame_den;
+    struct lv_disp_win v;
+    for (int i = 0; i < LV_WIN_N; i++)
+    {
+        int frame_rec = i >= COUNT(lv_win_ids);
+        if (frame_rec && !fn) v = *lv_win_rom(i);       /* no module frame: stock */
+        else if (!frame_rec && !want) v = *lv_win_rom(i);
+        else lv_win_layout(lv_win_rom(i), frame_rec ? fn : 0, frame_rec ? fd : 0, rn, rd, &v);
+        lv_win_write(i, &v);
+    }
+    lv_win_applied = want;
+    lv_win_frame_applied = (fn << 16) | fd;
+    sei(old);
+}
+
+/* tweak_task: the records are read at the next display setup, so they are
+ * written only while LV is stopped (the ML menu runs over Canon's menu,
+ * which stops it), never while recording */
+static void lv_win_step(void)
+{
+    if (lv || RECORDING) return;
+    if (anamorphic_preview != lv_win_applied
+        || ((lv_win_frame_num << 16) | lv_win_frame_den) != lv_win_frame_applied)
+        lv_win_update();
+}
+
+/* for modules that change the recorded frame shown through
+ * LV_DISP_WIN_FRAME_RECORDS (opengate 4:3): (num, den) at their apply, (0, 0)
+ * at their removal. Written at once: the module calls it at its own safe
+ * point, before the LV setup that reads the records. 1 = written */
+int lv_display_window_set_frame(int num, int den)
+{
+    lv_win_frame_num = num;
+    lv_win_frame_den = num ? den : 0;
+    if (RECORDING) return 0;
+    lv_win_update();
+    return lv_win_state > 0;
+}
+
+static MENU_SELECT_FUNC(anamorphic_preview_toggle)
+{
+    menu_numeric_toggle((int *) priv, delta, 0, 7);
+    lv_win_step();
+}
+#endif /* CONFIG_LV_DISPLAY_WINDOW */
+
+#endif /* FEATURE_ANAMORPHIC_PREVIEW */
 
 #ifdef FEATURE_DEFISHING_PREVIEW
 
@@ -3866,17 +4042,25 @@ static struct menu_entry display_menus[] = {
     },
     #endif
     #ifdef FEATURE_ANAMORPHIC_PREVIEW
-        #ifndef CONFIG_DISPLAY_FILTERS
-        #error This requires CONFIG_DISPLAY_FILTERS.
+        #if !defined(CONFIG_DISPLAY_FILTERS) && !defined(CONFIG_LV_DISPLAY_WINDOW)
+        #error This requires CONFIG_DISPLAY_FILTERS or CONFIG_LV_DISPLAY_WINDOW.
         #endif
     {
         .name = "Anamorphic",
         .priv     = &anamorphic_preview,
-        .update = anamorphic_preview_display, 
+        .update = anamorphic_preview_display,
         .max = 7,
         .choices = (const char *[]) {"OFF", "5:4 (1.25)", "4:3 (1.33)", "7:5 (1.4)", "3:2 (1.5)", "5:3 (1.66)", "9:5 (1.8)", "2:1"},
+        #ifdef CONFIG_LV_DISPLAY_WINDOW
+        /* Canon's display resizer does it: not an overlay, no INFO screen needed */
+        .select = anamorphic_preview_toggle,
+        .help = "Desqueezes the LiveView image, for anamorphic lenses.",
+        .help2 = "LCD and EVF, also while recording. Not on HDMI.",
+        .depends_on = DEP_LIVEVIEW,
+        #else
         .help = "Stretches LiveView image vertically, for anamorphic lenses.",
         .depends_on = DEP_LIVEVIEW | DEP_GLOBAL_DRAW,
+        #endif
 /*
         .children =  (struct menu_entry[]) {
             {

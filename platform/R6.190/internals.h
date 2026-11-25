@@ -113,6 +113,12 @@
  * src/vram.c, src/imgconv.h. */
 #define CONFIG_FACEYUV_LV
 
+/** The LCD / EVF image window is a RAM record that Canon reads at each
+ * display setup (LV_DISP_WIN_* in consts.h). Display > Anamorphic rewrites
+ * it, so the display resizer shows the image desqueezed (src/tweaks.c);
+ * faceyuv.c maps ML's overlays to the window Canon shows. */
+#define CONFIG_LV_DISPLAY_WINDOW
+
 /** PTP (only used when building with CONFIG_PTP=y):
  * send_data() is asynchronous, (handle, buf, size, total, callback, cb_priv, 0).
  * Canon's GetDeviceInfo (0xE02B4780) passes callback 0xE02B4761, which stores
