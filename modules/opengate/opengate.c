@@ -497,10 +497,13 @@ static uint32_t og_post_ofs[3];     /* 4:3: MvPostDevelop offset table, format o
 
 #define FAIL(why) do { og_reason = (why); og_log("prepare: %s", why); return 0; } while (0)
 
+static int og_win_frame;        /* the prepared mode shows a 4:3 frame (core window records) */
+
 static int og_prepare(const struct og_rate * r, int mode)
 {
     og_n_ram = og_n_rom = 0;
     og_list_error = 0;
+    og_win_frame = 0;
     og_prep_mode = mode;
     int m43 = mode == OG_MODE_43;
     const struct og_geometry * g = m43 ? &og_geo43 : &og_geo32;
@@ -727,13 +730,14 @@ static int og_prepare(const struct og_rate * r, int mode)
     if (m43)
     {
         og_add_words(og_enc43_words, COUNT(og_enc43_words));
-        /* LCD / EVF 4:3 window: area W = window W; deferred, ORCA reads the records at the
-         * movie LV setup */
+        /* LCD / EVF 4:3 window: the core owns the window records (Display > Anamorphic,
+         * CONFIG_LV_DISPLAY_WINDOW) and sizes the image box of records 2 / 0xC for a 4:3
+         * frame at the commit; ORCA reads them at the movie LV setup. Stock here: the last
+         * removal gave them back */
         for (int i = 0; i < 12; i++)
             if (RD32(OG_WIN_LCD43 + 4 * i) != og_win_lcd43[i] || RD32(OG_WIN_EVF43 + 4 * i) != og_win_evf43[i])
                 FAIL("display window records unexpected");
-        og_add_ram(OG_WIN_LCD43 + 0x10, 4, og_win_lcd43[4], og_win_lcd43[6], 1);
-        og_add_ram(OG_WIN_EVF43 + 0x10, 4, og_win_evf43[4], og_win_evf43[6], 1);
+        og_win_frame = 1;
     }
 
     if (og_list_error) FAIL("internal: change list full");
@@ -770,6 +774,10 @@ static int og_commit(void)
         return 0;
     }
     for (int i = 0; i < og_n_ram; i++) og_set(og_ram[i].addr, og_ram[i].size, og_ram[i].val);
+    /* the 4:3 frame for the LCD / EVF window, before the movie LV setup that reads it
+     * (also desqueezed when Display > Anamorphic is on) */
+    if (og_win_frame)
+        og_log("display window 4:3: %s", lv_display_window_set_frame(4, 3) ? "set" : "refused by the core");
     og_log("commit: done");
     return 1;
 }
@@ -784,6 +792,9 @@ static void og_remove(void)
 {
     int safe = og_safe_point();
     og_remove_rom();
+    /* the window records back to stock (or to the plain anamorphic layout): the next LV
+     * setup is Canon's own mode; never read with the open-gate words, as they go now */
+    lv_display_window_set_frame(0, 0);
     int left = og_restore_ram(safe);
     og_pending_deferred = left > 0;
     og_last_left = left;
