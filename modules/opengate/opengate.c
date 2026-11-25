@@ -1286,6 +1286,11 @@ static void og_check_live(void)
             og_state = OG_ACTIVE;
             og_log("active: capmode %x slot %d VD %d, base sync %d, Canon 24.00p setting %d",
                    cap, slot, vd, og_rd(OG_TIMING_INFO + 4), og_24p_stored());
+            /* the SetP / cartridge cells of the live column and Canon's live cartridge copy
+             * (*(0x11EA8+0x34), set at LV setup): all must be ours (OG_T_SETP / OG_T_CART) */
+            int lc = og_rd(OG_TIMING_INFO + 0x24);
+            og_log("timing in effect (col %d): SetP %d, cartridge %x, live cartridge %x",
+                   lc, RD16(OG_TCELL(0x280, lc)), RD32(OG_TCART(lc)), og_rd(OG_TIMING_INFO + 0x34));
             NotifyBox(2000, "Open gate ON: %s %s", og_mode_size[og_mode], og_rate->name);
         }
         return;

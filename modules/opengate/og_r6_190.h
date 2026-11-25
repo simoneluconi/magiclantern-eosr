@@ -82,8 +82,14 @@ static const struct og_rate og_rates[] =
     { 3, "25p",    947, 2061, 923, 2010, 2500 },
     { 4, "23.98p", 987, 2149, 964, 2097, 2398 },
 };
+/* SetP (+0x280: the line of the next-frame setup interrupt, evfSetParamInterrupt) and the
+ * cartridge (ESync output 2, us) follow Canon's rule for the readout end: SetP = ROD - 208,
+ * cartridge = ceil(SetP * HD / 27) + 1000. 627 / 0x3371, the 50p values (readout end 835),
+ * started that work inside our longer readout: every BUF_A error logged fell ~4.9 ms after
+ * SetP, at VD + 17.07 ms (research BUFA-RINGS.md). With 819 / 0x41FF (camera session
+ * 2026-11-25-setp): 4:3 25p IPB 13 min, 3:2 25p IPB 19 min, 3:2 29.97p IPB 9 min, clean */
 #define OG_T_SETP_STOCK  655        /* +0x280 */
-#define OG_T_SETP        627
+#define OG_T_SETP        819
 #define OG_T_ROD_STOCK   751        /* +0x500 */
 #define OG_T_ROD         1027
 #define OG_T_HD_STOCK    1140       /* +0xA00, HD ticks */
@@ -92,7 +98,7 @@ static const struct og_rate og_rates[] =
 #define OG_T_HDUS        19
 #define OG_T_FLAG        1          /* +0xF00, check only */
 #define OG_T_CART_STOCK  0x6FF0
-#define OG_T_CART        0x3371
+#define OG_T_CART        0x41FF     /* ceil(819 * 524 / 27) + 1000 us */
 
 /* ---- raw ring: MemoryNavigator LV raw entry (type 0x12) of both 4K sub-maps ----
  * {region 5, offset 0, slot 0x16D4DE0, count 3} -> 2 slots of 0x1E70000 (RESULTS run 4) */
