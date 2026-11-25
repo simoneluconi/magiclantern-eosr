@@ -1,6 +1,7 @@
 /** \file
  * Open gate 4K for the R6 1.9.0: the whole sensor height in 4K, recorded at
- * 4096x2736 (3:2), HEVC 4:2:2 10-bit, level 6.1, at 25p, 29.97p or 23.98p.
+ * 4096x2736 (3:2) at 25p, 29.97p or 23.98p, or at 3840x2880 (4:3, the centre 4864x3648 of
+ * the sensor) at 25p; HEVC 4:2:2 10-bit or H.264, level 6.1.
  *
  * How it works: every change is either
  *  - a ROM word (code or data) patched through apply_patches(), several words of one
@@ -57,7 +58,12 @@ static int og_mem_free(void)
 
 enum og_state { OG_OFF, OG_ARMED, OG_APPLIED, OG_ACTIVE, OG_REMOVING };
 
-static int og_ui;                       /* menu: the user's choice (not saved: OFF at boot) */
+/* menu: the user's choice (not saved: OFF at boot), OFF / 3:2 / 4:3 */
+enum og_mode { OG_MODE_OFF, OG_MODE_32, OG_MODE_43 };
+static int og_ui;
+static int og_mode;                     /* the mode of the patches in place (set at apply) */
+static const char * const og_mode_size[] = { "", "4096x2736", "3840x2880" };
+#define OG_43_FPS100 2500               /* 4:3: 25p only */
 static CONFIG_INT("opengate.debug", og_debug, 0);   /* menu: write ML/LOGS/OPENGATE.LOG */
 static volatile int og_state = OG_OFF;
 static const char * og_reason = "";     /* why the last apply was refused or removed */
@@ -281,8 +287,8 @@ static int og_alloc_copies(void)
  * the change list
  * ------------------------------------------------------------------------ */
 
-#define OG_MAX_RAM 128
-#define OG_MAX_ROM 96           /* 63 in use; og_apply_rom keeps 3 arrays of this on the 12 KB task stack */
+#define OG_MAX_RAM 128          /* 71 in use (3:2), 77 (4:3) */
+#define OG_MAX_ROM 96           /* 63 in use (both modes); og_apply_rom keeps 3 arrays of this on the 12 KB task stack */
 struct og_ramw { uint32_t addr; uint8_t size, deferred; uint32_t stock, val; };
 static struct og_ramw og_ram[OG_MAX_RAM];
 static int og_n_ram;
@@ -316,9 +322,24 @@ static void og_add_rom(uint32_t addr, uint32_t stock, uint32_t val, int insn, co
     og_rom[og_n_rom++] = (struct og_word) { addr, stock, val, insn, what };
 }
 
+/* the mode being prepared: 4:3 takes the og_words43 value of a word, and a 4:3 value equal to
+ * the stock value is not patched */
+static int og_prep_mode;
+
 static void og_add_words(const struct og_word * w, int n)
 {
-    for (int i = 0; i < n; i++) og_add_rom(w[i].addr, w[i].stock, w[i].val, w[i].insn, w[i].what);
+    for (int i = 0; i < n; i++)
+    {
+        uint32_t v = w[i].val;
+        if (og_prep_mode == OG_MODE_43)
+        {
+            int alt = 0;
+            for (int k = 0; k < COUNT(og_words43); k++)
+                if (og_words43[k].addr == w[i].addr) { v = og_words43[k].val; alt = 1; }
+            if (alt && v == w[i].stock) continue;
+        }
+        og_add_rom(w[i].addr, w[i].stock, v, w[i].insn, w[i].what);
+    }
 }
 
 /* ROM words in one 64 KB page less than this apart become one multi-byte patch:
@@ -456,11 +477,19 @@ static int og_restore_ram(int include_deferred)
 
 struct og_geometry
 {
-    uint16_t vin, vout;         /* develop input rows (sensor area) and output rows */
+    uint16_t vin, vout;         /* develop input rows (sensor area) and stored rows */
     uint16_t b0, b1;            /* develop input bands: b0 = 0 mod 8, b0 + b1 = vin */
     uint16_t stock_vin, stock_vout, stock_b0, stock_b1;
+    uint16_t hout;              /* develop output width; the store keeps the centre 4096 */
+    uint16_t vmargin;           /* develop rows above / below the stored frame */
 };
-static const struct og_geometry og_geo = { 3648, 2736, 2200, 1448, 2886, 2160, 1504, 1382 };
+/* 3:2: the whole 5472x3648 to 4096x2736 */
+static const struct og_geometry og_geo32 = { 3648, 2736, 2200, 1448, 2886, 2160, 1504, 1382, 4096, 0 };
+/* 4:3: 5472x3648 to 4320x2882 (1.2667 both ways), the store 4096x2880 at x 112 (112 + 2048 =
+ * 4320 / 2, the tile split on the develop pipe boundary) from row 1: with the offset table, a
+ * store from row 0 took a constant light-blue row from above the frame (6L0A8859) */
+static const struct og_geometry og_geo43 = { 3648, 2880, 2200, 1448, 2886, 2160, 1504, 1382, 4320, 1 };
+static uint32_t og_post_ofs[3];     /* 4:3: MvPostDevelop offset table, format of E1CA7A4C */
 
 /* ------------------------------------------------------------------------
  * prepare: build every copy and the change list, check every stock value.
@@ -469,11 +498,16 @@ static const struct og_geometry og_geo = { 3648, 2736, 2200, 1448, 2886, 2160, 1
 
 #define FAIL(why) do { og_reason = (why); og_log("prepare: %s", why); return 0; } while (0)
 
-static int og_prepare(const struct og_rate * r)
+static int og_prepare(const struct og_rate * r, int mode)
 {
     og_n_ram = og_n_rom = 0;
     og_list_error = 0;
-    const struct og_geometry * g = &og_geo;
+    og_prep_mode = mode;
+    int m43 = mode == OG_MODE_43;
+    if (m43 && r->fps100 != OG_43_FPS100) FAIL("4:3 is 25p only");
+    const struct og_geometry * g = m43 ? &og_geo43 : &og_geo32;
+    /* develop rows: the stored rows plus the margin above and below */
+    uint32_t vdev = g->vout + 2u * g->vmargin;
 
     if (RD32(OG_BLOB_PTRS + 0x18) != OG_BLOB_CMOS || RD32(OG_BLOB_PTRS + 0x1C) != OG_BLOB_DIGIC
         || RD32(OG_TIMING_INFO + 0x20) != OG_TIMING_TABLE)
@@ -489,6 +523,14 @@ static int og_prepare(const struct og_rate * r)
         if (RD32(e) != 5 || RD32(e + 4) != 0) FAIL("MemoryNavigator raw entry unexpected");
         og_add_ram(e + 8, 4, OG_RAW_SLOT_STOCK, OG_RAW_SLOT, 1);
         og_add_ram(e + 12, 4, OG_RAW_N_STOCK, OG_RAW_N, 1);
+        if (m43)
+        {
+            /* LV YUV slots: deferred like the raw entry */
+            uint32_t y = mnav + subs[k] + 0x10 * OG_MNAV_YUV;
+            if (RD32(y) != 6 || RD32(y + 4) != 0) FAIL("MemoryNavigator YUV entry unexpected");
+            og_add_ram(y + 8, 4, OG_YUV_SLOT_STOCK, OG_YUV_SLOT_43, 1);
+            og_add_ram(y + 12, 4, OG_YUV_N_STOCK, OG_YUV_N_43, 1);
+        }
     }
 
     /* sensor slot 9 full height + HEAD output */
@@ -587,10 +629,10 @@ static int og_prepare(const struct og_rate * r)
             if (*(uint32_t *) (dev + OG_DEV_DMA1 * pipe + vf_off[i]) != vf_val[i]) FAIL("develop rule mismatch (DMA)");
         if (!og_scale_matches(dev + OG_DEV_SCALE1 * pipe, &sst)) FAIL("develop rule mismatch (scale)");
     }
-    struct og_scale sc = og_scale_rule(g->vin, g->vout, g->b0);
+    struct og_scale sc = og_scale_rule(g->vin, vdev, g->b0);
     *(uint32_t *) (dev + 0x28) = g->b0;
     *(uint32_t *) (dev + 0x2C) = g->b1;
-    *(uint32_t *) (dev + 0x8E0) = g->vout;
+    *(uint32_t *) (dev + 0x8E0) = vdev;
     *(uint32_t *) (dev + 0x8E4) = g->vin;
     for (int pipe = 0; pipe < 2; pipe++)
     {
@@ -599,6 +641,21 @@ static int og_prepare(const struct og_rate * r)
         n = og_vdma(g->b0, g->b1, vf_off, vf_val);
         for (int i = 0; i < n; i++) *(uint32_t *) (dev + OG_DEV_DMA1 * pipe + vf_off[i]) = vf_val[i];
         og_scale_write(dev + OG_DEV_SCALE1 * pipe, &sc);
+    }
+    if (g->hout != OG_HOUT_STOCK)
+    {
+        /* output width: the H rule must reproduce the stock 4096 record first */
+        struct og_hscale hst = og_hscale_rule(OG_HIN, OG_HOUT_STOCK, OG_HB0);
+        struct og_hscale hn = og_hscale_rule(OG_HIN, g->hout, OG_HB0);
+        if (*(uint32_t *) (dev + 0x18) != OG_HOUT_STOCK || *(uint32_t *) (dev + 0x8D8) != OG_HOUT_STOCK)
+            FAIL("develop record unexpected (H)");
+        for (int pipe = 0; pipe < 2; pipe++)
+            if (!og_hscale_matches(dev + OG_DEV_SCALE1 * pipe, &hst)) FAIL("develop rule mismatch (H scale)");
+        *(uint32_t *) (dev + 0x18) = g->hout;
+        *(uint32_t *) (dev + 0x8D8) = g->hout;
+        for (int pipe = 0; pipe < 2; pipe++) og_hscale_write(dev + OG_DEV_SCALE1 * pipe, &hn);
+        og_log("develop %dx%d (H bands %d/%d, V bands %d/%d), store 4096x%d at x %d y %d",
+               g->hout, vdev, hn.n1, hn.n2, sc.n1, sc.n2, g->vout, (g->hout - OG_HOUT_STOCK) / 2, g->vmargin);
     }
     og_add_ram(OG_DEV_PTR, 4, OG_DEV_REC, (uint32_t) dev, 0);
 
@@ -613,16 +670,38 @@ static int og_prepare(const struct og_rate * r)
         || *(uint32_t *) (crop + 0x04) != 0 || *(uint32_t *) (crop + 0x2C) != 0
         || *(uint32_t *) (crop + 0x0C) != g->stock_vout || *(uint32_t *) (crop + 0x34) != g->stock_vout)
         FAIL("post-develop record unexpected");
-    uint32_t gcd = og_gcd(g->vout, g->vin);
-    *(uint32_t *) (post + 0x38) = g->vout / 2;
+    uint32_t gcd = og_gcd(vdev, g->vin);
+    *(uint32_t *) (post + 0x38) = g->vout / 2;      /* stored tiles: Vout rows */
     *(uint32_t *) (post + 0x40) = g->vout / 2;
-    *(uint32_t *) (post + 0x5C) = g->vout;
-    *(uint32_t *) (post + 0x68) = g->vout - 1u;
-    *(uint32_t *) (post + 0xC0) = g->vout / gcd;
+    *(uint32_t *) (post + 0x5C) = vdev;             /* frame: the develop output */
+    *(uint32_t *) (post + 0x68) = vdev - 1u;
+    *(uint32_t *) (post + 0xC0) = vdev / gcd;
     *(uint32_t *) (post + 0xC8) = g->vin / gcd;
     *(uint32_t *) (post + 0xAC) = (uint32_t) crop;
-    *(uint32_t *) (crop + 0x04) = (g->vout - g->stock_vout) / 2;
-    *(uint32_t *) (crop + 0x2C) = (g->vout - g->stock_vout) / 2;
+    *(uint32_t *) (crop + 0x04) = (vdev - g->stock_vout) / 2;
+    *(uint32_t *) (crop + 0x2C) = (vdev - g->stock_vout) / 2;
+    if (g->hout != OG_HOUT_STOCK)
+    {
+        /* input / frame width = the develop output, H ratio hout:5472, the centre 4096 stored
+         * through the offset table, as Canon's path 4 (E1CA7A4C: {0x00010003, y << 16 | x, 0}) */
+        if (*(uint32_t *) (post + 0x18) != OG_HOUT_STOCK || *(uint32_t *) (post + 0x1C) != OG_HOUT_STOCK
+            || *(uint32_t *) (post + 0x58) != OG_HOUT_STOCK || *(uint32_t *) (post + 0x64) != OG_HOUT_STOCK - 1u
+            || *(uint32_t *) (post + 0xBC) != 128 || *(uint32_t *) (post + 0xC4) != 171
+            || *(uint32_t *) (post + 0xB0) != OG_POST_OFS_TBL || *(uint32_t *) (post + 0xB4) != OG_POST_OFS_TBL)
+            FAIL("post-develop record unexpected (H)");
+        *(uint32_t *) (post + 0x18) = g->hout;
+        *(uint32_t *) (post + 0x1C) = g->hout;
+        *(uint32_t *) (post + 0x58) = g->hout;
+        *(uint32_t *) (post + 0x64) = g->hout - 1u;
+        uint32_t hg = og_gcd(g->hout, OG_HIN);
+        *(uint32_t *) (post + 0xBC) = g->hout / hg;
+        *(uint32_t *) (post + 0xC4) = OG_HIN / hg;
+        og_post_ofs[0] = OG_POST_OFS_FLAGS;
+        og_post_ofs[1] = ((uint32_t) g->vmargin << 16) | ((g->hout - OG_HOUT_STOCK) / 2);
+        og_post_ofs[2] = 0;
+        *(uint32_t *) (post + 0xB0) = (uint32_t) og_post_ofs;
+        *(uint32_t *) (post + 0xB4) = (uint32_t) og_post_ofs;
+    }
     og_add_ram(OG_POST_PTR, 4, OG_POST_REC, (uint32_t) post, 0);
     og_add_words(og_memmap_words, COUNT(og_memmap_words));
 
@@ -647,9 +726,21 @@ static int og_prepare(const struct og_rate * r)
     og_add_words(og_disp_words, COUNT(og_disp_words));
     og_add_words(og_enc_words, COUNT(og_enc_words));
 
+    if (m43)
+    {
+        og_add_words(og_enc43_words, COUNT(og_enc43_words));
+        /* LCD / EVF 4:3 window: area W = window W; deferred, ORCA reads the records at the
+         * movie LV setup */
+        for (int i = 0; i < 12; i++)
+            if (RD32(OG_WIN_LCD43 + 4 * i) != og_win_lcd43[i] || RD32(OG_WIN_EVF43 + 4 * i) != og_win_evf43[i])
+                FAIL("display window records unexpected");
+        og_add_ram(OG_WIN_LCD43 + 0x10, 4, og_win_lcd43[4], og_win_lcd43[6], 1);
+        og_add_ram(OG_WIN_EVF43 + 0x10, 4, og_win_evf43[4], og_win_evf43[6], 1);
+    }
+
     if (og_list_error) FAIL("internal: change list full");
     if (!og_check_ram()) FAIL("a Canon value is not stock");
-    og_log("prepare %s: %d RAM words, %d ROM words", r->name, og_n_ram, og_n_rom);
+    og_log("prepare %s %s: %d RAM words, %d ROM words", og_mode_size[mode], r->name, og_n_ram, og_n_rom);
     return 1;
 }
 
@@ -833,6 +924,24 @@ static int og_mcp_col(const struct og_mcp * m, const char ** why)
     return col;
 }
 
+/* the same for a mode: 4:3 is 25p only. The mode is the one of the patches in place, or the
+ * user's choice while none are */
+static int og_mode_now(void)
+{
+    return og_removal_needed() ? og_mode : og_ui;
+}
+
+static int og_mcp_col_mode(const struct og_mcp * m, const char ** why, int mode)
+{
+    int col = og_mcp_col(m, why);
+    if (col && mode == OG_MODE_43 && m->fps100 != OG_43_FPS100)
+    {
+        if (why) *why = "4:3 is 25p only";
+        return 0;
+    }
+    return col;
+}
+
 /* debug: when each posting comes, relative to Canon's LiveView state (is the setting
  * posted before the movie LV restarts?). Written by the handlers, logged by the worker */
 struct og_ev { int ms; uint32_t prop, a, b, c, d, dlo, dhi; int cap, slot, path, state; };
@@ -909,7 +1018,7 @@ PROP_HANDLER(PROP_MOVIE_CONTROL_PARAM)
         /* not supported: the patches go now, before Canon restarts the LV. The setting
          * stays known until the posting is decided (the photo LV one is not the setting) */
         const char * why;
-        if (!og_mcp_col(&m, &why) && og_removal_needed()) og_lost(why, 1);
+        if (!og_mcp_col_mode(&m, &why, og_mode_now()) && og_removal_needed()) og_lost(why, 1);
         /* a recording setup change (same rate, other bytes) posted while the movie LV is
          * already stopped (Canon's MENU opened from the movie LV or during REC): the patches
          * go now, with the sensor off. Decided 500 ms later the LV has restarted with the new
@@ -1164,7 +1273,8 @@ static void og_check_live(void)
     int cap = og_capmode(), slot = og_slot(), vd = og_rd(OG_IMGCTRL + 0x10);
     const struct og_rate * live = og_rate_of_col(og_rd(OG_TIMING_INFO + 0x24));
     int ok = cap == OG_CAPMODE_4K30 && slot == OG_SLOT_FULL && live
-          && vd >= live->fl && vd <= live->fl + 2;
+          && vd >= live->fl && vd <= live->fl + 2
+          && (og_mode != OG_MODE_43 || live->fps100 == OG_43_FPS100);
     if (ok)
     {
         if (og_rate != live) og_log("live rate: 4K %s", live->name);
@@ -1176,7 +1286,7 @@ static void og_check_live(void)
             og_state = OG_ACTIVE;
             og_log("active: capmode %x slot %d VD %d, base sync %d, Canon 24.00p setting %d",
                    cap, slot, vd, og_rd(OG_TIMING_INFO + 4), og_24p_stored());
-            NotifyBox(2000, "Open gate ON: 4096x2736 %s", og_rate->name);
+            NotifyBox(2000, "Open gate ON: %s %s", og_mode_size[og_mode], og_rate->name);
         }
         return;
     }
@@ -1277,7 +1387,7 @@ static void og_decide_posting(void)
         /* a supported rate alone stays applied: all three columns are patched, and the
          * live check follows the live one */
         const char * why;
-        if (!og_mcp_col(&m, &why)) og_lost_note(why, 0);
+        if (!og_mcp_col_mode(&m, &why, og_mode_now())) og_lost_note(why, 0);
         /* a new rate also moves rate-derived bytes (0x10-0x11, 0x1C-0x1D from 25p to
          * 29.97p, camera log): only a change with the same rate is a new recording setup */
         return;
@@ -1287,9 +1397,26 @@ static void og_decide_posting(void)
     if (og_removal_needed()) og_lost_note("Movie recording settings changed", 1);
 }
 
+/* debug log: one line at REC start and one at the stop, with the open gate on */
+static void og_rec_log(void)
+{
+    static int rec_since;
+    if (RECORDING && !rec_since && og_state == OG_ACTIVE)
+    {
+        rec_since = get_ms_clock() | 1;
+        og_log("REC start: %s 4K %s", og_mode_size[og_mode], og_rate ? og_rate->name : "");
+    }
+    else if (!RECORDING && rec_since)
+    {
+        og_log("REC stop after %d s, state %d", (get_ms_clock() - rec_since) / 1000, og_state);
+        rec_since = 0;
+    }
+}
+
 static void og_step(void)
 {
     og_debug_step();
+    og_rec_log();
     og_decide_posting();
     if (og_ready_shown)
     {
@@ -1325,7 +1452,8 @@ static void og_step(void)
                     !lv ? "no LV" : !og_safe_point() ? "not a safe point" :
                     og_pend_since ? "setting posted" :
                     !r ? "setting unknown" : og_setting_seq != og_setting_changes ? "setting changed" :
-                    !og_prop_ok(col) ? "movie setting" : 0;
+                    !og_prop_ok(col) ? "movie setting" :
+                    og_ui == OG_MODE_43 && r->fps100 != OG_43_FPS100 ? "4:3 needs 25p" : 0;
                 static const char * logged_wait;
                 if (wait != logged_wait)
                 {
@@ -1334,7 +1462,8 @@ static void og_step(void)
                 }
                 if (wait) break;
                 if (!og_alloc_copies()) { og_reason = "Not enough memory"; og_ui = 0; og_state = OG_OFF; break; }
-                if (!og_prepare(r) || !og_commit())
+                int mode = og_ui;
+                if (!og_prepare(r, mode) || !og_commit())
                 {
                     og_log("apply refused: %s", og_reason);
                     NotifyBox(5000, "Open gate refused:\n%s", og_reason);
@@ -1342,31 +1471,34 @@ static void og_step(void)
                     og_state = OG_OFF;
                     break;
                 }
+                og_mode = mode;
                 og_rate = r;
                 og_active_since = 0;
                 og_bad_samples = 0;
                 og_state = OG_APPLIED;
-                og_log("applied: 4K %s, Canon 24.00p setting %d", r->name, og_24p_stored());
+                og_log("applied: %s 4K %s, Canon 24.00p setting %d", og_mode_size[mode], r->name, og_24p_stored());
                 og_env_log("apply");
-                NotifyBox(OG_READY_MS, "Open gate ready (4K %s):\nswitch to movie mode.", r->name);
+                NotifyBox(OG_READY_MS, "Open gate ready (%s %s):\nswitch to movie mode.", og_mode_size[mode], r->name);
                 og_ready_shown = get_ms_clock() | 1;
             }
             break;
 
+        /* OFF or the other size in the menu: removed at the next safe point; the other size is
+         * then applied by OFF -> ARMED (no reboot) */
         case OG_APPLIED:
         case OG_ACTIVE:
-            if (!og_ui) { og_state = OG_REMOVING; break; }
+            if (og_ui != og_mode) { og_state = OG_REMOVING; break; }
             og_check_live();
             break;
 
         case OG_REMOVING:
-            if (og_ui) { og_state = OG_APPLIED; og_active_since = 0; break; }
+            if (og_ui == og_mode) { og_state = OG_APPLIED; og_active_since = 0; break; }
             if (og_safe_point())
             {
                 og_remove();
                 og_state = OG_OFF;
                 og_reason = "";
-                og_log("removed (menu OFF)");
+                og_log(og_ui ? "removed (menu: other size)" : "removed (menu OFF)");
             }
             break;
     }
@@ -1393,18 +1525,24 @@ static MENU_UPDATE_FUNC(og_update)
     {
         case OG_ACTIVE:
             MENU_SET_VALUE("ON");
-            MENU_SET_RINFO("4096x2736 %s", og_rate ? og_rate->name : "");
+            MENU_SET_RINFO("%s %s", og_mode_size[og_mode], og_rate ? og_rate->name : "");
             break;
         case OG_APPLIED:
             MENU_SET_VALUE("Ready");
+            MENU_SET_RINFO("%s", og_mode_size[og_mode]);
             MENU_SET_WARNING(MENU_WARN_INFO, "Ready: switch to movie mode (4K %s).", og_rate ? og_rate->name : "");
             break;
         case OG_REMOVING:
-            MENU_SET_VALUE("Turning off");
-            MENU_SET_WARNING(MENU_WARN_INFO, "Switch to photo mode once to finish turning off.");
+            MENU_SET_VALUE(og_ui ? "Changing" : "Turning off");
+            MENU_SET_WARNING(MENU_WARN_INFO, og_ui ? "Switch to photo mode once to change the size."
+                                                   : "Switch to photo mode once to finish turning off.");
             break;
         case OG_ARMED:
+        {
+            const struct og_rate * r = og_rate_of_col(og_setting_col);
+            int m43 = og_ui == OG_MODE_43;
             MENU_SET_VALUE("Waiting");
+            MENU_SET_RINFO("%s", og_mode_size[og_ui]);
             if (og_hdmi)
                 MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Disconnect HDMI.");
             else if (og_fps24_in())
@@ -1412,12 +1550,16 @@ static MENU_UPDATE_FUNC(og_update)
             else if (og_setting_bad == 2)
                 MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Turn Canon movie cropping OFF.");
             else if (og_setting_bad == 3)
-                MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Use 4K 25p, 29.97p or 23.98p.");
+                MENU_SET_WARNING(MENU_WARN_NOT_WORKING, m43 ? "Use 4K 25p." : "Use 4K 25p, 29.97p or 23.98p.");
             else if (og_setting_bad || !og_setting_col)
-                MENU_SET_WARNING(MENU_WARN_ADVICE, "Set Canon movie size to 4K 25/29.97/23.98p, crop OFF.");
+                MENU_SET_WARNING(MENU_WARN_ADVICE, m43 ? "Set Canon movie size to 4K 25p, crop OFF."
+                                                       : "Set Canon movie size to 4K 25/29.97/23.98p, crop OFF.");
+            else if (m43 && r && r->fps100 != OG_43_FPS100)
+                MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "4:3 is 25p only: set Canon to 4K 25p.");
             else
                 MENU_SET_WARNING(MENU_WARN_ADVICE, "Switch to photo mode once to apply.");
             break;
+        }
         default:
             if (og_reason && og_reason[0]) MENU_SET_WARNING(MENU_WARN_INFO, "Last: %s", og_reason);
             break;
@@ -1431,10 +1573,11 @@ static struct menu_entry og_menu[] =
     {
         .name    = "Open gate 4K",
         .priv    = &og_ui,
-        .max     = 1,
+        .max     = 2,
+        .choices = CHOICES("OFF", "3:2 4096x2736", "4:3 3840x2880"),
         .update  = og_update,
-        .help    = "Full sensor height in 4K: 4096x2736, 25/29.97/23.98p.",
-        .help2   = "Set 4K 25/29.97/23.98p, crop OFF; then photo mode once.",
+        .help    = "Full sensor height in 4K: 3:2 4096x2736 or 4:3 3840x2880.",
+        .help2   = "3:2: 25/29.97/23.98p. 4:3: 25p. Crop OFF, photo mode once.",
         .submenu_width = 650,
         .children = (struct menu_entry[]) {
             {

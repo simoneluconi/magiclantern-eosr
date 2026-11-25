@@ -256,6 +256,64 @@ static const struct og_word og_enc_words[] =
     { 0xE1F1D394, 60000, 76000, 0, "OG enc H.264 kbps 24p IPB Light" },
 };
 
+/* ---- 4:3 mode, 3840x2880 at 25p (ANAMORPHIC-43.md 9, opengate/L3-FREEZE-ENC.md 6.2; camera
+ * og43-A 6L0A8867 / 8868). Full sensor height, centre 4864 columns: the develop scales
+ * 5472x3648 to 4320x2882 (1.2667 both ways), the store keeps 4096x2880 at x 112 y 1, ORCA crops
+ * the centre 3840 at 1:1 ----
+ * og_words43: the 4:3 value of words of the tables above (same stock check). A value equal to
+ * the stock value is not patched */
+struct og_alt { uint32_t addr, val; };
+static const struct og_alt og_words43[] =
+{
+    { 0xE0FFA778, 2880 },           /* memmap rec 3 heights */
+    { 0xE0FFA784, 2880 },
+    { 0xE01310C4, 0x20029015 },     /* movs r0,#2: aspect 2, the 4:3 photo window */
+    /* encoder 3840x2880, ring depth 5. Canon's frame rule: stride align1024(2.5 w) = 10240 B,
+     * rows align64(h) = 2880. At 2880 rows the Sitter ME mode (h16 > 2880 -> 2) and the ARM CME
+     * mode (w > 4096 -> 2) both stay 1 (L3-FREEZE-ENC.md 5). Each value disassembled over the
+     * open-gate words */
+    { 0xE03879C0, 0x6070F44F },     /* S3 mov.w r0,#0xF00 */
+    { 0xE03879C8, 0x60103040 },     /* S5 movw r0,#0xB40 */
+    { 0xE03BB520, 0xF44F6670 },     /* S9 mov.w r6,#0xF00 */
+    { 0xE03BB524, 0xE0056734 },     /* S10 mov.w r7,#0xB40 */
+    { 0xE03BB87C, 0x08CA0000 },     /* M1 5 x 10240 x 2880 */
+    { 0xE03BB450, 0x0866F44F },     /* M2 CME 1024 x 1472 x 10 = 0xE60000 (M3 / M4 cover 2880) */
+    { 0xE03761B8, 0x08080608 },     /* ORCA width stock: 3840, a centred 1:1 crop of the store */
+    { 0xE03761D8, 0x429A66B4 },     /* ORCA height mov.w r6,#0x5A0 */
+    { 0xE03B713C, 0x900770E4 },     /* B1 0x1C80000 >= 2 x 5120 x 2880 */
+    { 0xE03B7140, 0x70B4F04F },     /* B2 2 x 4096 x 2880 (pool 6 = B2 / 4, exact) */
+};
+/* 4:3 only: the encoder size classifier, 3840 x any -> index 3 (bne -> nop, as S7 for 4096) */
+static const struct og_word og_enc43_words[] =
+{
+    { 0xE03B85AC, 0x2703D10D, 0x2703BF00, 1, "OG enc 4:3 size index 3 (3840)" },
+};
+
+/* 4:3: geometry of the develop and the store */
+#define OG_HIN          5472        /* develop input width */
+#define OG_HB0          1376        /* develop input band H of pipe 0 */
+#define OG_HOUT_STOCK   4096
+#define OG_POST_OFS_TBL 0xE1CA7A40  /* stock MvPostDevelop offset table (+0xB0 / +0xB4) */
+#define OG_POST_OFS_FLAGS 0x00010003    /* as Canon's path 4 table E1CA7A4C */
+
+/* 4:3: LV YUV slots, MemoryNavigator type 0 of both 4K sub-maps (region 6). A 4096x2880 store
+ * takes ~32.7 MB at the fixed 11,264 B pitch: 4 x 0x1E00000 -> 3 x 0x2200000 (og43-L2c / A) */
+#define OG_MNAV_YUV         0x00
+#define OG_YUV_SLOT_STOCK   0x1E00000
+#define OG_YUV_N_STOCK      4
+#define OG_YUV_SLOT_43      0x2200000
+#define OG_YUV_N_43         3
+
+/* 4:3: LCD / EVF window records (.data 0x245C8, 0x30 B: panel W,H; VRAM W,H; area W,H; window
+ * W,H; x,y in area; x,y in VRAM). ORCA sizes the resizer output from the AREA and the display
+ * places it at the VRAM x,y: the 4:3 records 2 / 0xC have the 4:3 window with the 3:2 area, so
+ * the area width becomes the window width (og43-L2b) */
+#define OG_WIN_RECS         0x245C8
+#define OG_WIN_LCD43        (OG_WIN_RECS + 0x30 * 0x2)
+#define OG_WIN_EVF43        (OG_WIN_RECS + 0x30 * 0xC)
+static const uint32_t og_win_lcd43[12] = { 900, 600, 928, 600, 900, 600, 800, 600, 50, 0, 50, 0 };
+static const uint32_t og_win_evf43[12] = { 1280, 960, 1280, 854, 1280, 854, 1136, 854, 72, 0, 72, 0 };
+
 /* runtime MMU pages: E0130000 E0320000 E0360000 E0370000 E0380000 E0390000 E03B0000
  * E07F0000 E0C70000 E0FF0000 E1F10000 (11) in sections E01 E03 E07 E0C E0F E1F (6).
  * Reserved by mmu_reserve_pages_for_patches() (core) for the patch list itself; the core
