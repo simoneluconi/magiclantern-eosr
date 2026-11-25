@@ -1287,6 +1287,21 @@ static void og_check_live(void)
     {
         if (og_rate != live) og_log("live rate: 4K %s", live->name);
         og_rate = live;     /* the rate shown in the menu */
+        /* a rate changed under the patches (25p <-> 29.97p from Canon's MENU) is the setting
+         * now: the same checks as og_observe_setting (capture mode, slot, live column, and
+         * Canon's posted setting), plus the VD of that column. Without this the setting stayed
+         * the old rate with a newer change count, and after the removal at the next photo
+         * switch the apply waited for a stock movie LV to learn it again (two photo visits) */
+        int seq = og_setting_changes;
+        if ((og_setting_col != live->col || og_setting_seq != seq) && !og_pend_since
+            && og_prop_ok(live->col) && seq == og_setting_changes)
+        {
+            if (og_setting_col != live->col) og_log("setting: 4K %s (live)", live->name);
+            og_setting_col = live->col;
+            og_setting_seq = seq;
+            og_setting_bad = 0;
+            og_save_setting(live->col);
+        }
         if (og_bad_samples) og_log("live state back after %d bad samples", og_bad_samples);
         og_bad_samples = 0;
         if (og_state == OG_APPLIED)
@@ -1475,6 +1490,24 @@ static void og_step(void)
                 {
                     logged_wait = wait;
                     if (wait) og_log("waiting: %s (path %x, col %d)", wait, og_path(), col);
+                }
+                /* in the movie LV with a known, supported setting only the photo-mode visit is
+                 * missing (a safe point: no 4K movie LV, no 4K memory map): say so, once each
+                 * time this is reached */
+                static int hint_shown;
+                int need_photo = r && lv && og_path() == OG_PATH_MOVIE && !RECORDING
+                    && (wait == 0 || !strcmp(wait, "not a safe point") || !strcmp(wait, "deferred restore"))
+                    && og_setting_seq == og_setting_changes && og_prop_ok(col)
+                    && !og_hdmi && !og_pend_since && !og_fps24_in();
+                if (!need_photo) hint_shown = 0;
+                else if (!hint_shown)
+                {
+                    hint_shown = 1;
+                    og_log("hint: photo mode once to apply %s %s", og_mode_size[og_ui], r->name);
+                    if (og_reason && og_reason[0])
+                        NotifyBox(6000, "Open gate off: %s.\nSwitch to photo mode once to apply 4K %s.", og_reason, r->name);
+                    else
+                        NotifyBox(5000, "Open gate: switch to photo mode once\nto apply 4K %s.", r->name);
                 }
                 if (wait) break;
                 if (!og_alloc_copies()) { og_reason = "Not enough memory"; og_ui = 0; og_state = OG_OFF; break; }
