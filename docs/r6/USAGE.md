@@ -52,6 +52,7 @@ Only features the R6 does not have already are enabled. Every new option starts 
 - Also in Canon Log and HDR PQ (10-bit H.265, 4:2:2).
 - 4K ALL-I is 470 Mbps, about 60 MB/s: use a V90 card. FHD is 90 Mbps (135 Mbps in 10-bit).
 - Turn it OFF: once the ML menu is closed, an ALL-I setting goes back to IPB of the same size and rate. The same happens at start-up if the entry is OFF.
+- High Frame Rate is IPB: turning it on with an ALL-I setting gives Canon's High Frame Rate setting.
 - Not together with open gate.
 - Tested in Canon Log, 4K and FHD 25p: every frame is an I-frame (4K about 440 Mbps), and the clips play on the camera.
 
