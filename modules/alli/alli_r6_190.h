@@ -98,6 +98,15 @@ static const struct ai_pair ai_pairs[] =
 #define AI_SET_KIND         0xE0AFB957
 #define AI_GET_PARAM        0xE0AA54EB
 
+/* High Frame Rate (research/hidden-features-survey.md 2.1b):
+ * - E07A99EA: HFR on (GUI cache +0xF98, a plain getter; MVR_IS_HIGH_FRAME_RATE in consts.h);
+ * - GuiUtilMovie_ReplaceKind_By_HighFps E0AFCB56(kind, on): the kind map of Canon's HFR
+ *   dialog (E0BC6756; tables E1F081B4 NTSC / E1F08214 PAL). It holds Canon's IPB kinds only,
+ *   so an ALL-I kind comes back unchanged and would stay set under HFR. The module maps it to
+ *   the IPB kind of the same size and rate first, then asks Canon's map for the HFR kind */
+#define AI_GET_HFR          0xE07A99EB
+#define AI_HFR_KIND         0xE0AFCB57
+
 /* Canon's player refuses clips above 470.2 Mbps (ChkBitRate in CheckMovieFileInfo, the only
  * load at E04EBC34); 4K ALL-I is 470 Mbps video plus audio */
 #define AI_PLAYER_BITRATE       0xE04EC01C

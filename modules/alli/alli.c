@@ -16,7 +16,9 @@
  * then one apply_patches() call (all or nothing; it checks the stock bytes again).
  * OFF, a refused apply, or a boot with the entry OFF while an ALL-I setting is stored:
  * Canon's SetMovieSizeKind with the IPB kind of the same size, rate and crop family,
- * then the patches go. Everything happens in LiveView only (no Canon dialog, no ML menu
+ * then the patches go. High Frame Rate turned on while an ALL-I setting is set (Canon's HFR
+ * kind map knows only its IPB kinds, so the ALL-I kind would stay): the IPB kind's HFR kind,
+ * from Canon's own map. Everything happens in LiveView only (no Canon dialog, no ML menu
  * open, not recording); nothing at power off.
  *
  * Values and their sources: alli_r6_190.h.
@@ -67,6 +69,8 @@ static int ai_off_checked;                      /* with the entry OFF and no cel
 static int (*const ai_get_kind)(uint32_t * kind) = (void *) AI_GET_KIND;
 static int (*const ai_set_kind)(uint32_t kind) = (void *) AI_SET_KIND;
 static void (*const ai_get_param)(uint8_t rec[16]) = (void *) AI_GET_PARAM;
+static int (*const ai_get_hfr)(void) = (void *) AI_GET_HFR;
+static uint32_t (*const ai_hfr_kind)(uint32_t kind, int on) = (void *) AI_HFR_KIND;
 
 /* the stored size kind, or AI_KIND_END if unknown */
 static uint32_t ai_kind(void)
@@ -89,6 +93,32 @@ static uint32_t ai_alli_of(uint32_t k)
     for (int i = 0; i < COUNT(ai_pairs); i++)
         if (ai_pairs[i].ipb == k) return ai_pairs[i].alli;
     return 0;
+}
+
+/* the kind to set instead of k (k if nothing to do): an ALL-I kind with the entry OFF or
+ * under High Frame Rate goes to the IPB kind of the same size and rate; under HFR then to
+ * Canon's own HFR kind of that IPB kind */
+static uint32_t ai_target(uint32_t k)
+{
+    int hfr = ai_get_hfr() == 1;
+    uint32_t t = k, u;
+    if ((!ai_ui || hfr) && (u = ai_ipb_of(t))) t = u;
+    if (hfr && t != k) t = ai_hfr_kind(t, 1);
+    return t;
+}
+
+/* while the cells are in: an ALL-I setting under HFR. GUI-cache reads only (the movie
+ * parameter and the HFR flag); says so once per change of either, so the full kind is read
+ * only then */
+static int ai_hfr_check(void)
+{
+    static uint8_t last[17];
+    uint8_t rec[17] = { 0 };
+    ai_get_param(rec);
+    rec[16] = ai_get_hfr() == 1;
+    if (!memcmp(rec, last, sizeof(rec))) return 0;
+    memcpy(last, rec, sizeof(rec));
+    return rec[16] && rec[9] == 1;     /* HFR on, GOP 1 (ALL-I) */
 }
 
 static int ai_opengate_in(void)
@@ -249,17 +279,18 @@ static void ai_remove(void)
     ai_in = 0;
 }
 
-/* an ALL-I setting is stored: Canon's own SET, with the IPB kind of the same size and rate.
- * Returns 1 if nothing (more) to do, 0 to try again later, -1 if Canon refused */
+/* an ALL-I setting is stored where it no longer belongs (entry OFF, or HFR on): Canon's own
+ * SET, with the kind of ai_target(). Returns 1 if nothing (more) to do, 0 to try again
+ * later, -1 if Canon refused */
 static int ai_restore(void)
 {
-    uint32_t k = ai_kind(), ipb = ai_ipb_of(k);
-    if (!ipb) return 1;
+    uint32_t k = ai_kind(), t = ai_target(k);
+    if (k == AI_KIND_END || t == k) return 1;
     if (!ai_can_restore()) return 0;
-    int r = ai_set_kind(ipb);
+    int r = ai_set_kind(t);
     uint32_t now = ai_kind();
-    ai_log("restore: kind %d -> %d: %d, now %d", k, ipb, r, now);
-    if (r != 1 || now != ipb)
+    ai_log("restore: kind %d -> %d: %d, now %d (HFR %d)", k, t, r, now, ai_get_hfr());
+    if (r != 1 || now != t)
     {
         ai_why = "Canon refused the IPB setting";
         return -1;
@@ -307,6 +338,21 @@ static void ai_task(void * unused)
         {
             ai_ui = 0;
             NotifyBox(5000, "ALL-I OFF: open gate is on.");
+        }
+
+        /* HFR turned on while an ALL-I setting is set: Canon's HFR dialog keeps the ALL-I kind
+         * (its map has IPB kinds only); set Canon's HFR kind of the same size and rate */
+        static int hfr_pending;
+        if (ai_ui && ai_in && ai_hfr_check()) hfr_pending = 1;
+        if (ai_ui && ai_in && hfr_pending)
+        {
+            int r = ai_restore();
+            if (r == 0) continue;                       /* wait: ML menu open */
+            hfr_pending = 0;
+            if (r < 0)
+                NotifyBox(8000, "ALL-I with High Frame Rate:\n"
+                                "Canon refused its HFR setting.\n"
+                                "Choose one in Movie rec. quality.");
         }
 
         if (ai_ui && !ai_in)
@@ -406,7 +452,14 @@ static unsigned int ai_deinit(void)
     /* at power off touch nothing: the patches are in RAM, stock at the next boot; a stored
      * ALL-I setting goes back to IPB when the module runs with the entry OFF */
     if (ml_shutdown_requested) return 0;
-    if (ai_can_restore() && ai_restore() == 1) ai_remove();
+    if (ai_can_restore())
+    {
+        /* the entry's saved value stays; the target is computed as with the entry OFF */
+        int ui = ai_ui;
+        ai_ui = 0;
+        if (ai_restore() == 1) ai_remove();
+        ai_ui = ui;
+    }
     return 0;
 }
 
