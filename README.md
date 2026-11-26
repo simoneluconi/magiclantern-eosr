@@ -1,7 +1,7 @@
 Magic Lantern for the Canon EOS R6
 ==================================
 
-**Open gate 4K in 3:2 and 4:3, anamorphic preview, true 24.00p, one-hour clips and more, on the original EOS R6 (firmware 1.9.0).**
+**Open gate 4K in 3:2 and 4:3, anamorphic preview, ALL-I, true 24.00p, two-hour clips and more, on the original EOS R6 (firmware 1.9.0).**
 
 Magic Lantern (ML) runs next to Canon's firmware, straight from the memory card. This unofficial
 fork brings it to the R6, with extra video features.
