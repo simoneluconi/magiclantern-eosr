@@ -1219,6 +1219,12 @@ static void change_mov_time_limit(void* priv, int delta)
     // Canon's limit so the menu shows what is really in effect.
     // The writer patches take effect at the next recording start
     // (change_mov_time_limit is not called while recording).
+#ifdef CONFIG_MMU_RUNTIME_PAGES_MAX
+    // The runtime page pool is shared: a module enabled earlier in this boot
+    // may have used its free pages. Grow it by what these patches still need
+    // (adds nothing if they fit); apply_patches() reports what fails.
+    mmu_reserve_pages_for_patches(patches, n_patches);
+#endif
     int err = apply_patches(patches, n_patches);
     if (err)
     {

@@ -147,6 +147,11 @@ static int heat_timer_set(int factor)
         .description = "Heat timer: seconds of Canon's movie heat table",
         .is_instruction = 0,
     };
+#ifdef CONFIG_MMU_RUNTIME_PAGES_MAX
+    // the runtime page pool is shared with modules that may have used its
+    // free pages first: grow it by what this patch still needs
+    mmu_reserve_pages_for_patches(&patch, 1);
+#endif
     err = apply_patches(&patch, 1);
     if (!err)
         heat_timer_applied = factor;
