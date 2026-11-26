@@ -355,6 +355,11 @@ static void ai_task(void * unused)
                                 "Choose one in Movie rec. quality.");
         }
 
+        /* the entry ON from the last session: applied at start-up without a message (only a
+         * refusal says something); turned ON from the menu: "ready" */
+        static int boot_seen, quiet;
+        if (!boot_seen) { boot_seen = 1; quiet = ai_ui; }
+
         if (ai_ui && !ai_in)
         {
             if (!ai_apply())
@@ -362,8 +367,9 @@ static void ai_task(void * unused)
                 ai_ui = 0;
                 NotifyBox(5000, "ALL-I refused:\n%s", ai_why);
             }
-            else NotifyBox(5000, "ALL-I ready: Movie rec. quality,\n"
-                                 "\"For editing (ALL-I)\", up to 30p.");
+            else if (!quiet) NotifyBox(5000, "ALL-I ready: Movie rec. quality,\n"
+                                             "\"For editing (ALL-I)\", up to 30p.");
+            quiet = 0;
         }
         else if (!ai_ui && !ai_restore_refused && (ai_in || !ai_off_checked))
         {
