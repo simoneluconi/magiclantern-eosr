@@ -26,6 +26,7 @@ Only features the R6 does not have already are enabled. Every new option starts 
 
 - Choices: shorter limits, **29:59 (Canon)**, **45 min**, **59:59**, **1:29:59** and **1:59:59**.
 - Up to 30p a clip can last up to 1:59:59. At 50/60p it stops at 59:59 at most.
+- Canon's remaining-time display has no hours, so with a longer limit it shows 59:59 until less than an hour is left.
 - High Frame Rate (100/120p): with a limit above 29:59 it records up to 29:59; with 29:59 (Canon) or less it keeps Canon's 7:29. A 10-minute 100p clip was recorded and played on a PC; playback on the camera past 7:29 is not tested yet.
 - Above 29:59 ML also patches Canon's movie writer (its per-clip tables, the audio tables and the 8 MB index buffer). Without that the camera would stop with Err 70 after the limit, or leave an unplayable file.
 - It also lets Canon's player open clips over 30 minutes; without that the camera says "Cannot playback movie".

@@ -343,6 +343,13 @@ extern int winsys_bmp_dirty_bit_neg;
 #define MVR_TIME_LIMIT_FUNC 0xE074ECC6
 #define MVR_TIME_LIMIT_FUNC_CODE { 0x10, 0xB5, 0x5A, 0xF0, 0x8F, 0xFE, 0x01, 0x28 } /* push {r4,lr}; bl 0xE07A99EA; cmp r0,#1 */
 #define MVR_IS_HIGH_FRAME_RATE() (((int (*)(void)) 0xE07A99EB)() == 1) /* Canon's own test, Thumb */
+// Return address of the clip-stop check's call (bl at 0xE0BD265A). The other
+// callers only cap the remaining-time display, which shows minutes:seconds
+// with no hours: on camera, a 1:29:59 limit showed as 30 min. They get at
+// most MVR_TIME_LIMIT_DISPLAY_MAX_SEC (59:59), as Canon shows when the card
+// holds more than the limit; only the stop check gets the real limit.
+#define MVR_TIME_LIMIT_STOP_CALLER     0xE0BD265E
+#define MVR_TIME_LIMIT_DISPLAY_MAX_SEC (60 * 60 - 1)
 
 // The MP4 writer limits the clip length too. mp4wInitializeMmlibParam
 // (0xE05F07CA, run at each recording start) sizes the per-file sample

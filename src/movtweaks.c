@@ -912,7 +912,7 @@ static uint32_t mov_limit_hfr_ms;       // High Frame Rate
 // stops the clip when the elapsed ms equals it, so the value must not change
 // during a clip: the frame rate can't change while recording, and neither
 // can the menu value. Called from Canon's tasks: no locks, no waits.
-static uint32_t __attribute__((used)) mov_time_limit_hook(void)
+static uint32_t mov_time_limit_for_mode(void)
 {
     if (MVR_IS_HIGH_FRAME_RATE())
         return mov_limit_hfr_ms;
@@ -921,6 +921,23 @@ static uint32_t __attribute__((used)) mov_time_limit_hook(void)
     if (video_mode_fps == 0 || video_mode_fps > 30)
         return mov_limit_high_fps_ms;
     return mov_limit_ms;
+}
+
+static uint32_t __attribute__((used, noinline)) mov_time_limit_hook(void)
+{
+    // the hook is entered with ldr pc from Canon's function entry, so lr is
+    // still the return address in Canon's caller
+    uint32_t caller = (uint32_t) __builtin_return_address(0);
+    uint32_t ms = mov_time_limit_for_mode();
+#ifdef MVR_TIME_LIMIT_STOP_CALLER
+    // Canon's display has no hours: only the clip-stop check gets the
+    // real limit, the display at most MVR_TIME_LIMIT_DISPLAY_MAX_SEC (consts.h)
+    if ((caller & ~1) != MVR_TIME_LIMIT_STOP_CALLER)
+        ms = MIN(ms, MVR_TIME_LIMIT_DISPLAY_MAX_SEC * 1000);
+#else
+    (void) caller;
+#endif
+    return ms;
 }
 #endif
 
