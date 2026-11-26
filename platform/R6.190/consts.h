@@ -329,16 +329,34 @@ extern int winsys_bmp_dirty_bit_neg;
 #define MVR_FRAME_NUMBER (*(int*)(220 + MVR_190_STRUCT))
 #define MVR_BYTES_WRITTEN MEM((212 + MVR_190_STRUCT))
 
-// Clip length limit, for FEATURE_OVERRIDE_MOVIE_30_MIN_LIMIT (these two are
-// verified, unlike the MVR values above). 0xE074ECC6 returns the literal
-// 1799000 ms (29:59), or 449000 ms (7:29) in High Frame Rate mode; the
-// DlgLiveView per-second handler (0xE0BD24F0) stops the clip when the
-// elapsed ms equals it. Each pool word has one load (ldr at 0xE074ECD0 /
-// 0xE074ED6C) and the value is only used there and, divided by 1000, as a
-// cap for the remaining-time display (0xE08CD028, 0xE08CCF32).
-// Both words are in the 64 kB page 0xE0740000: one remapped page.
-#define MVR_TIME_LIMIT_NORMAL_FPS 0xE074ED68
-#define MVR_TIME_LIMIT_HIGH_FPS   0xE074F168
+// Clip length limit, for FEATURE_OVERRIDE_MOVIE_30_MIN_LIMIT (verified,
+// unlike the MVR values above). MVR_TIME_LIMIT_FUNC (0xE074ECC6, no
+// arguments) returns the limit in ms: the literal 1799000 (29:59), or 449000
+// (7:29) when 0xE07A99EA() == 1 (High Frame Rate). Canon has no other value,
+// none for 50p / 59.94p. It is read again each second while recording: the
+// DlgLiveView per-second handler (call at 0xE0BD265A) stops the clip when
+// the elapsed ms equals it. The only other callers cap the remaining-time
+// display at limit / 1000 s (0xE08CCF96, 0xE08CD034). No code branches into
+// the function past its entry.
+// movtweaks.c replaces it with its own (an 8-byte hook, function_hook_patch),
+// which gives each frame rate its limit. Page 0xE0740000: one remapped page.
+#define MVR_TIME_LIMIT_FUNC 0xE074ECC6
+#define MVR_TIME_LIMIT_FUNC_CODE { 0x10, 0xB5, 0x5A, 0xF0, 0x8F, 0xFE, 0x01, 0x28 } /* push {r4,lr}; bl 0xE07A99EA; cmp r0,#1 */
+#define MVR_IS_HIGH_FRAME_RATE() (((int (*)(void)) 0xE07A99EB)() == 1) /* Canon's own test, Thumb */
+// Callers that get the real limit, by return address. These are the only
+// three bl sites in the ROM, and no data pointer to the function exists:
+// - 0xE0BD265E: the clip-stop check (bl at 0xE0BD265A);
+// - 0xE08CD038: the remaining time, min(card, limit / 1000) (0xE08CD028),
+//   for the shooting-screen time item (0xE060B6CE, shows minutes with
+//   MVR_DISPLAY_PATCHES), OlcRecordTime (0xE096CAB6, clamps to 59:59 by
+//   itself) and the record-start checks (0xE074D484, 0xE074D53E, 0xE08CD06C);
+// - 0xE08CCF9A: the card remaining time (0xE08CCF32) in the state where
+//   Canon shows the limit instead (GUI+0x4C == 1); its only live caller
+//   is 0xE08CD028 above.
+// Any other caller would get at most MVR_TIME_LIMIT_DISPLAY_MAX_SEC (59:59),
+// which every minutes:seconds display can show.
+#define MVR_TIME_LIMIT_FULL_CALLERS    { 0xE0BD265E, 0xE08CD038, 0xE08CCF9A }
+#define MVR_TIME_LIMIT_DISPLAY_MAX_SEC (60 * 60 - 1)
 
 // The MP4 writer limits the clip length too. mp4wInitializeMmlibParam
 // (0xE05F07CA, run at each recording start) sizes the per-file sample
@@ -351,16 +369,25 @@ extern int winsys_bmp_dirty_bit_neg;
 // MVR_WRITER_PATCHES (applied by movtweaks.c together with the time limit,
 // only when the limit is above Canon's, all or none):
 // {address, Canon's value, new value, is an instruction}
-// - capacity 108000 -> 216000 entries: 60:03 at 59.94p, 72:00 at 50p;
-// - the table sizes in bytes that go with it: 8-byte tables x2; AAC sizes
-//   4 x capacity (Canon's 345600 holds only 86400 of the 108000 it
-//   allows); composition offsets (ctts) 8 x capacity (Canon sized them for
-//   2/3 of the frames, the ratio measured on IPB clips; x2 would leave
-//   0.1 % at 60:00, 59.94p);
-// - the AAC chunk table (stsc) 0x8000 -> 0x10000 bytes, 4096 -> 8192
-//   entries (lsls r1,r2,#12 -> #13 at 0xE05F08D2). Canon does not check it:
-//   AAC adds about 2.1 per second (measured), so it overflowed silently
-//   from 32.7 min; now 65 min;
+// - capacity 108000 -> 216000 entries: 60:03 at 59.94p, 72:00 at 50p,
+//   2:00:07 at 29.97p, 2:24:00 at 25p;
+// - the table sizes in bytes that go with it: 8-byte tables x2;
+//   composition offsets (ctts) 8 x capacity (Canon sized them for 2/3 of
+//   the frames, the ratio measured on IPB clips; x2 would leave 0.1 % at
+//   60:00, 59.94p);
+// - AAC (IPB Light) gets a sample count limit of its own. Canon compares the
+//   AAC sample count with the shared capacity (ldr r0,[r5,#0x24];
+//   cmp sb,r0 at 0xE03E6EB8): 46.875 samples per second, so 216000 would
+//   stop the clip with Err 70 at 76:48. cmp.w sb,#0x54000 instead: 344064
+//   samples, 2:02:20. Its table (4 bytes per sample, pool word 0xE05F0BEC)
+//   is 4 x 344064 (Canon's 345600 held only 86400 of the 108000 it
+//   allowed). LPCM has no such table: its sample count is a sum;
+// - the audio chunk table (stsc) 0x8000 -> 0x20000 bytes, 4096 -> 16384
+//   entries (lsls r1,r2,#12 -> #14 at 0xE05F08D2). Canon does not check it
+//   (its count is compared with the capacity, not with this size): AAC adds
+//   about 2.1 per second (measured), so it overflowed silently from
+//   32.7 min; now 2:10. LPCM adds one only when the samples per chunk
+//   change;
 // - the moov buffers (one per file set) 4 -> 8 MB, mov.w fp,#0x400000 at
 //   0xE05F02B0. The moov builder has no capacity check; measured on camera
 //   about 1176 B/s at 50p with AAC (moov 524260 B for 303 s), so a 60 min
@@ -372,20 +399,25 @@ extern int winsys_bmp_dirty_bit_neg;
 //   gets up to 511 extra bytes (about 0.1-0.2 % of such clips, from the
 //   ROM). The two 4 MB compares (0xE03A38D6, 0xE05EDAF0) move to 8 MB, so
 //   a 4..8 MB header takes the same path as Canon's own headers.
+// At 1:59:59, 29.97p: 215,758 frames of the 216,000, AAC 337,453 samples of
+// the 344,064, about 15,000 stsc entries; moov about 4.3 MB (LPCM) or 5.9 MB
+// (AAC) of the 8 (estimated from the 50p clips).
 // Writer pool (MovRecResource, 193.5 MiB) peak on camera: 163.9 MiB with
-// the tables doubled, 173 MiB with all of these (4K 50p / 59.94p, HFR, FHD).
+// the tables doubled, 173 MiB with these but the AAC limit and stsc 16384
+// (4K 50p / 59.94p, HFR, FHD); those two add 1.1 MiB (both file sets).
 // Tested on camera: a 60 min FHD 50p IPB Light (AAC) clip stopped at
 // 59:59 with a 4.46 MB moov and checked fine on a PC (ffprobe, ffmpeg).
 // Canon's player refused it, see MVR_PLAYBACK_PATCHES.
-// Pages: 0xE05F0000, 0xE03A0000, 0xE05E0000; with the time limit, the
-// player and the heat timer, 6 remapped pages (CONFIG_MMU_RUNTIME_PAGES in
-// internals.h).
+// Pages: 0xE05F0000, 0xE03A0000, 0xE03E0000, 0xE05E0000; with the time
+// limit, the player, the time display and the heat timer, 8 remapped pages
+// (CONFIG_MMU_RUNTIME_PAGES in internals.h).
 #define MVR_WRITER_PATCHES { \
     { 0xE05F0BE4,     864000,    1728000, 0 }, /* 8-byte tables x2 */ \
     { 0xE05F0BE8,     108000,     216000, 0 }, /* capacity x2 */ \
-    { 0xE05F0BEC,     345600,     864000, 0 }, /* AAC table: 4 x capacity */ \
+    { 0xE03E6EB8, 0x45816A68, 0x2FA8F5B9, 1 }, /* AAC samples: cmp.w sb,#0x54000 */ \
+    { 0xE05F0BEC,     345600,    1376256, 0 }, /* AAC table: 4 x 344064 */ \
     { 0xE05F0BF0,     576000,    1728000, 0 }, /* ctts: 8 x capacity */ \
-    { 0xE05F08D0, 0x0311200D, 0x0351200D, 1 }, /* AAC stsc 4096 -> 8192 */ \
+    { 0xE05F08D0, 0x0311200D, 0x0391200D, 1 }, /* audio stsc 4096 -> 16384 */ \
     { 0xE05F02B0, 0x0B80F44F, 0x0B00F44F, 1 }, /* moov buffers 4 -> 8 MB */ \
     { 0xE05F032C, 0xF5B14659, 0xF5B104D1, 1 }, /* 3rd buffer: 8 << 19 = 4 MB */ \
     { 0xE03A38D8, 0xD2030F80, 0xD2030F00, 1 }, /* cmp 4 -> 8 MB */ \
@@ -399,22 +431,38 @@ extern int winsys_bmp_dirty_bit_neg;
 // player's 270 MB region, so its size is not the limit for a single file.
 // MVR_PLAYBACK_PATCHES (applied with MVR_WRITER_PATCHES) raise the frame
 // count limit, in page 0xE04E0000:
-// - 20/24/25/30/50p: cmp.w r1,r3,lsl #3 (r3 = 225 x fps) -> lsl #5, 2 h;
+// - 20/24/25/30/50p: cmp.w r1,r3,lsl #3 (r3 = 225 x fps) -> lsl #6, 4 h
+//   (lsl #5, 2 h, would leave 25p and 24.00p 20 frames at 1:59:59);
 // - 23.976p: movw r0,#0xA894 -> mov.w r0,#0x40000, 3 h;
 // - 29.97p: movw r0,#0xD2BA -> mov.w r0,#0x40000, 2.4 h;
 // - 59.94p: literal 0x1A574 (loaded only at 0xE04EB91C) -> 0x80000, 2.4 h.
 // Not changed: the in-camera editor (cutting) keeps its own 30 min and 4 MB
 // limits, so long clips may not be trimmed on the camera.
 #define MVR_PLAYBACK_PATCHES { \
-    { 0xE04EB8DC, 0x0FC3EBB1, 0x1F43EBB1, 1 }, /* 20..50p: fps x 1800 -> x 7200 */ \
+    { 0xE04EB8DC, 0x0FC3EBB1, 0x1F83EBB1, 1 }, /* 20..50p: fps x 1800 -> x 14400 */ \
     { 0xE04EB8F4, 0x0094F64A, 0x2080F44F, 1 }, /* 23.976p: 43156 -> 262144 */ \
     { 0xE04EB904, 0x20BAF24D, 0x2080F44F, 1 }, /* 29.97p: 53946 -> 262144 */ \
     { 0xE04EBBB4, 0x0001A574, 0x00080000, 0 }, /* 59.94p: 107892 -> 524288 */ \
 }
 
-// Longest limit, given MVR_WRITER_PATCHES: 216000 frames last 60:03 at
-// 59.94p.
-#define MVR_TIME_LIMIT_MAX_SEC    (60 * 60)
+// The shooting-screen time item (LiveView item 0x3B, 0xE060B6CE) prints
+// "%02d:%02d". While recording it shows the elapsed time in total minutes
+// (61:00, 119:59). In standby it shows the remaining time with minutes % 60
+// (divmod by 60 twice at 0xE060B76A..0xE060B77B), so a 1:29:59 limit read
+// 29:59. MVR_DISPLAY_PATCHES (applied with MVR_WRITER_PATCHES) drop the
+// second divmod: standby also shows total minutes (89:59, 119:59), the same
+// 5 characters. r0 is the quotient of the first divmod; r3 = seconds is set
+// next (0xE060B77C) and r1 is not read after. No code branches into
+// 0xE060B776..0xE060B77D. Page 0xE0600000.
+#define MVR_DISPLAY_PATCHES { \
+    { 0xE060B774, 0xF0D6213C, 0xBF004602, 1 }, /* movs r1,#60; blx.. -> mov r2,r0; nop */ \
+    { 0xE060B778, 0x460AEC9A, 0xBF00BF00, 1 }, /* ..divmod; mov r2,r1 -> nop; nop */ \
+}
+
+// Longest limits, given MVR_WRITER_PATCHES (216000 frames): 2 h (1:59:59)
+// up to 30p, 1 h (59:59) at 50p / 59.94p (60:03 at 59.94p).
+#define MVR_TIME_LIMIT_MAX_SEC          (2 * 60 * 60)
+#define MVR_TIME_LIMIT_MAX_HIGH_FPS_SEC (60 * 60)
 // High Frame Rate (119.88p / 100p, no audio) is stored as a slow-motion clip
 // at 29.97p / 23.976p / 25p (not checked on a file: Canon's player plays these
 // clips, and ChkTotalFrame refuses any other fps code), so Canon's 7:29 is the
@@ -424,8 +472,8 @@ extern int winsys_bmp_dirty_bit_neg;
 // (limits above Canon's 29:59), 29:59 fits:
 // - writer: 29:59 at 119.88p = 215,664 frames of the 216,000 (ctts too);
 // - moov: 18.55 B per frame measured on a 50p clip, so about 4 MB of the 8;
-// - player: 262,144 frames at 29.97p / 23.976p (36 min at 119.88p), 180,000
-//   at 25p (30:00 at 100p).
+// - player: 262,144 frames at 29.97p / 23.976p (36 min at 119.88p), 360,000
+//   at 25p (60 min at 100p).
 // Up to Canon's 29:59 nothing is patched and high frame rate keeps 7:29.
 #define MVR_TIME_LIMIT_HFR_CANON_SEC (7 * 60 + 29)
 #define MVR_TIME_LIMIT_MAX_HFR_SEC (29 * 60 + 59)

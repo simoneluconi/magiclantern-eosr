@@ -11,6 +11,7 @@ Extra features, loaded at start-up. **SET** turns a module ON; then restart the 
 * **lua**: the Scripts tab.
 * **opengate**: Movie > Open gate 4K.
 * **fps24**: Movie > 24.00p.
+* **alli**: Movie > ALL-I.
 
 Trouble? Hold **SET** while switching on: no modules are loaded.
 

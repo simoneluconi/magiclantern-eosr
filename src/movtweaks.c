@@ -881,8 +881,74 @@ static CONFIG_INT("movie.time_limit", mov_time_limit, 30 * 60);
 // matches; it is below 2^31 and reads as 99:59:59 when divided by 1000.
 #define MOV_TIME_LIMIT_OFF_MS 359999999
 
+// Canon shows the limit as the remaining time, and on R6 a whole hour
+// (60:00) showed as 0:00 (recording itself was fine). Limits in whole half
+// hours are one second less, as Canon's own 29:59: 60 min -> 59:59,
+// 2 h -> 1:59:59. sec is not MOV_TIME_LIMIT_OFF.
+static uint32_t mov_time_limit_ms(int sec)
+{
+    uint32_t ms = sec * 1000;
+    if (sec % (30 * 60) == 0)
+        ms -= 1000;
+    return ms;
+}
+
+#if defined(MVR_TIME_LIMIT_MAX_HIGH_FPS_SEC) && !defined(MVR_TIME_LIMIT_FUNC)
+#error "MVR_TIME_LIMIT_MAX_HIGH_FPS_SEC needs MVR_TIME_LIMIT_FUNC (one limit per frame rate)"
+#endif
+
+#ifdef MVR_TIME_LIMIT_FUNC
+#ifndef CONFIG_DIGIC_678X
+#error "MVR_TIME_LIMIT_FUNC is hooked with function_hook_patch (DIGIC 6/7/8/X)"
+#endif
+// The limits in ms that mov_time_limit_hook() returns. They are set while
+// the hook is out (change_mov_time_limit), and not while recording.
+static uint32_t mov_limit_ms;           // up to 30p
+static uint32_t mov_limit_high_fps_ms;  // 50p / 59.94p
+static uint32_t mov_limit_hfr_ms;       // High Frame Rate
+
+// Replaces Canon's MVR_TIME_LIMIT_FUNC (no arguments, returns the limit in
+// ms; see consts.h). Canon reads it again each second while recording and
+// stops the clip when the elapsed ms equals it, so the value must not change
+// during a clip: the frame rate can't change while recording, and neither
+// can the menu value. Called from Canon's tasks: no locks, no waits.
+static uint32_t mov_time_limit_for_mode(void)
+{
+    if (MVR_IS_HIGH_FRAME_RATE())
+        return mov_limit_hfr_ms;
+    // video_mode_fps is rounded (29.97 -> 30, 59.94 -> 60); 0 until the
+    // movie setting is known: the shorter limit then
+    if (video_mode_fps == 0 || video_mode_fps > 30)
+        return mov_limit_high_fps_ms;
+    return mov_limit_ms;
+}
+
+static uint32_t __attribute__((used, noinline)) mov_time_limit_hook(void)
+{
+    // the hook is entered with ldr pc from Canon's function entry, so lr is
+    // still the return address in Canon's caller
+    uint32_t caller = (uint32_t) __builtin_return_address(0);
+    uint32_t ms = mov_time_limit_for_mode();
+#ifdef MVR_TIME_LIMIT_FULL_CALLERS
+    // Canon's displays have no hours: the callers known to handle the real
+    // limit get it, any other at most MVR_TIME_LIMIT_DISPLAY_MAX_SEC (consts.h)
+    static const uint32_t full_callers[] = MVR_TIME_LIMIT_FULL_CALLERS;
+    for (int i = 0; i < COUNT(full_callers); i++)
+        if ((caller & ~1) == full_callers[i])
+            return ms;
+    ms = MIN(ms, MVR_TIME_LIMIT_DISPLAY_MAX_SEC * 1000);
+#else
+    (void) caller;
+#endif
+    return ms;
+}
+#endif
+
 static MENU_UPDATE_FUNC(print_mov_time_limit)
 {
+    // what is in effect: 59:59, 1:29:59, 1:59:59 for whole half hours
+    int sec = mov_time_limit_ms(mov_time_limit) / 1000;
+
     if (mov_time_limit == MOV_TIME_LIMIT_OFF)
     {
         MENU_SET_VALUE("OFF (no limit)");
@@ -891,18 +957,21 @@ static MENU_UPDATE_FUNC(print_mov_time_limit)
     {
         MENU_SET_VALUE("29:59 (Canon)");
     }
-    else if (mov_time_limit % (60 * 60) == 0)
+    else if (sec >= 60 * 60)
     {
-        // whole hours are one second less (see change_mov_time_limit)
-        MENU_SET_VALUE("%d:59", mov_time_limit / 60 - 1);
+        MENU_SET_VALUE("%d:%02d:%02d", sec / 3600, sec / 60 % 60, sec % 60);
     }
-    else if (mov_time_limit >= 60)
+    else if (sec >= 60 && sec % 60 == 0)
     {
-        MENU_SET_VALUE("%d min", mov_time_limit / 60);
+        MENU_SET_VALUE("%d min", sec / 60);
+    }
+    else if (sec >= 60)
+    {
+        MENU_SET_VALUE("%d:%02d", sec / 60, sec % 60);
     }
     else
     {
-        MENU_SET_VALUE("%d sec", mov_time_limit);
+        MENU_SET_VALUE("%d sec", sec);
     }
 
     // highlighted when something is patched
@@ -923,8 +992,18 @@ static MENU_UPDATE_FUNC(print_mov_time_limit)
         #else
         MENU_SET_WARNING(MENU_WARN_ADVICE, "Too long recording makes empty files on ExFAT, ok on FAT32");
         #endif
+        /* above Canon's limit, more frames per second get their own, shorter
+         * maximum (only the highest-level warning is shown: one line) */
+        #if defined(MVR_TIME_LIMIT_MAX_HIGH_FPS_SEC) && defined(MVR_TIME_LIMIT_HFR_CANON_SEC)
+        if (mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit > MVR_TIME_LIMIT_MAX_HIGH_FPS_SEC)
+        {
+            int hs = mov_time_limit_ms(MVR_TIME_LIMIT_MAX_HIGH_FPS_SEC) / 1000;
+            MENU_SET_WARNING(MENU_WARN_INFO, "50/59.94p: up to %d:%02d. High frame rate: up to %d:%02d.",
+                             hs / 60, hs % 60,
+                             MVR_TIME_LIMIT_MAX_HFR_SEC / 60, MVR_TIME_LIMIT_MAX_HFR_SEC % 60);
+        }
+        #endif
         #ifdef MVR_TIME_LIMIT_HFR_CANON_SEC
-        /* above Canon's limit, high frame rate gets its own, shorter maximum */
         if (mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit > 30 * 60)
             MENU_SET_WARNING(MENU_WARN_INFO, "High frame rate: up to %d:%02d.",
                              MVR_TIME_LIMIT_MAX_HFR_SEC / 60, MVR_TIME_LIMIT_MAX_HFR_SEC % 60);
@@ -935,7 +1014,8 @@ static MENU_UPDATE_FUNC(print_mov_time_limit)
 static void change_mov_time_limit(void* priv, int delta)
 {
     // Time is in held in seconds.  Defaults to 30m.
-    // Allow upwards changes 15m / 30m at a time up to 180m, then OFF (no limit).
+    // Allow upwards changes 15m up to 60m, then 30m at a time up to 180m,
+    // then OFF (no limit).
     // Allow downwards changes 5m at a time until 5m, then 1m, then 10s,
     // 10s minimum.
 
@@ -964,7 +1044,7 @@ static void change_mov_time_limit(void* priv, int delta)
             mov_time_limit -= 60;
         else if (mov_time_limit <= 30 * 60)
             mov_time_limit -= 5 * 60;
-        else if (mov_time_limit <= 90 * 60)
+        else if (mov_time_limit <= 60 * 60)
             mov_time_limit -= 15 * 60;
         else if (mov_time_limit <= 180 * 60)
             mov_time_limit -= 30 * 60;
@@ -973,7 +1053,7 @@ static void change_mov_time_limit(void* priv, int delta)
     {
         if (mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit >= 180 * 60)
             mov_time_limit = MOV_TIME_LIMIT_OFF;
-        else if (mov_time_limit >= 90 * 60)
+        else if (mov_time_limit >= 60 * 60)
             mov_time_limit += 30 * 60;
         else if (mov_time_limit >= 30 * 60)
             mov_time_limit += 15 * 60;
@@ -998,14 +1078,15 @@ static void change_mov_time_limit(void* priv, int delta)
     // we revert to stock, which technically is 29m 59s.
     // Otherwise, we patch in the new limit.
     uint32_t limit_ms = mov_time_limit == MOV_TIME_LIMIT_OFF ? MOV_TIME_LIMIT_OFF_MS
-                                                             : mov_time_limit * 1000;
-    // Canon shows the limit as the remaining time in minutes:seconds, and
-    // on R6 a whole hour (60:00) showed as 0:00 (recording itself was fine).
-    // One second less, as Canon's own 29:59: 60 min -> 59:59.
-    if (mov_time_limit != MOV_TIME_LIMIT_OFF && mov_time_limit % (60 * 60) == 0)
-        limit_ms -= 1000;
+                                                             : mov_time_limit_ms(mov_time_limit);
     // only above Canon's limit: shorter limits leave writer and player as they are
     int long_clips = mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit > 30 * 60;
+    uint32_t high_fps_limit_ms = limit_ms;
+#ifdef MVR_TIME_LIMIT_MAX_HIGH_FPS_SEC
+    // 50p / 59.94p: more frames per second, a shorter maximum (consts.h)
+    if (mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit > MVR_TIME_LIMIT_MAX_HIGH_FPS_SEC)
+        high_fps_limit_ms = mov_time_limit_ms(MVR_TIME_LIMIT_MAX_HIGH_FPS_SEC);
+#endif
     uint32_t hfr_limit_ms = limit_ms;
 #ifdef MVR_TIME_LIMIT_MAX_HFR_SEC
     // high frame rate has more frames per second: its own maximum with the
@@ -1018,9 +1099,10 @@ static void change_mov_time_limit(void* priv, int delta)
     if (mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit > hfr_max_sec)
         hfr_limit_ms = hfr_max_sec * 1000;
 #endif
-    // Above Canon's limit, the movie writer's own limits (MVR_WRITER_PATCHES)
-    // and those of Canon's player for longer clips (MVR_PLAYBACK_PATCHES)
-    // are patched too, if the camera defines them (see consts.h).
+    // Above Canon's limit, the movie writer's own limits (MVR_WRITER_PATCHES),
+    // those of Canon's player for longer clips (MVR_PLAYBACK_PATCHES) and
+    // Canon's remaining-time display (MVR_DISPLAY_PATCHES) are patched too,
+    // if the camera defines them (see consts.h).
     struct long_clip_patch { uint32_t addr, old_value, new_value, is_instruction; const char * what; };
 #ifdef MVR_WRITER_PATCHES
     static const struct { uint32_t addr, old_value, new_value, is_instruction; }
@@ -1036,7 +1118,14 @@ static void change_mov_time_limit(void* priv, int delta)
 #else
     #define N_PLAYBACK_PATCHES 0
 #endif
-    #define N_LONG_CLIP_PATCHES (N_WRITER_PATCHES + N_PLAYBACK_PATCHES)
+#ifdef MVR_DISPLAY_PATCHES
+    static const struct { uint32_t addr, old_value, new_value, is_instruction; }
+        display_patches[] = MVR_DISPLAY_PATCHES;
+    #define N_DISPLAY_PATCHES COUNT(display_patches)
+#else
+    #define N_DISPLAY_PATCHES 0
+#endif
+    #define N_LONG_CLIP_PATCHES (N_WRITER_PATCHES + N_PLAYBACK_PATCHES + N_DISPLAY_PATCHES)
     struct long_clip_patch long_clip[N_LONG_CLIP_PATCHES + 1];
     int n_long_clip = 0;
 #ifdef MVR_WRITER_PATCHES
@@ -1055,26 +1144,56 @@ static void change_mov_time_limit(void* priv, int delta)
             playback_patches[i].is_instruction, "MOV time limit: playback" };
     }
 #endif
-    struct patch patches[2 + N_LONG_CLIP_PATCHES] = {
-        {
-            .addr = (uint8_t *)MVR_TIME_LIMIT_NORMAL_FPS,
-            .old_value = 0x1b7358, // 29m59s
-            .new_value = limit_ms,
-            .size = 4,
-            .description = "MOV time limit"
-        },
-        {
-            .addr = (uint8_t *)MVR_TIME_LIMIT_HIGH_FPS,
-            .old_value = 0x6d9e8, // 7m29s
-            .new_value = hfr_limit_ms,
-            .size = 4,
-            .description = "MOV time limit, high FPS"
-        }
+#ifdef MVR_DISPLAY_PATCHES
+    for (int i = 0; i < N_DISPLAY_PATCHES; i++)
+    {
+        long_clip[n_long_clip++] = (struct long_clip_patch) {
+            display_patches[i].addr, display_patches[i].old_value, display_patches[i].new_value,
+            display_patches[i].is_instruction, "MOV time limit: display" };
+    }
+#endif
+    struct patch patches[2 + N_LONG_CLIP_PATCHES] = {};
+    int n_patches = 0;
+#ifdef MVR_TIME_LIMIT_FUNC
+    // Canon's limit function is replaced by mov_time_limit_hook(): one
+    // limit per frame rate. apply_patches() copies the hook code and checks
+    // Canon's code first.
+    struct function_hook_patch limit_hook = {
+        .patch_addr = MVR_TIME_LIMIT_FUNC,
+        .orig_content = MVR_TIME_LIMIT_FUNC_CODE,
+        .target_function_addr = (uint32_t) mov_time_limit_hook,
+        .description = "MOV time limit",
     };
-    int n_patches = 2;
+    uint8_t limit_hook_code[8];
+    unpatch_memory(MVR_TIME_LIMIT_FUNC);
+    // the hook is out: set what it returns
+    mov_limit_ms = limit_ms;
+    mov_limit_high_fps_ms = high_fps_limit_ms;
+    mov_limit_hfr_ms = hfr_limit_ms;
+    convert_f_patch_to_patch(&limit_hook, &patches[n_patches++], limit_hook_code);
+#else
+    (void) high_fps_limit_ms;
+    patches[n_patches++] = (struct patch) {
+        .addr = (uint8_t *)MVR_TIME_LIMIT_NORMAL_FPS,
+        .old_value = 0x1b7358, // 29m59s
+        .new_value = limit_ms,
+        .size = 4,
+        .description = "MOV time limit"
+    };
+    patches[n_patches++] = (struct patch) {
+        .addr = (uint8_t *)MVR_TIME_LIMIT_HIGH_FPS,
+        .old_value = 0x6d9e8, // 7m29s
+        .new_value = hfr_limit_ms,
+        .size = 4,
+        .description = "MOV time limit, high FPS"
+    };
+    unpatch_memory(MVR_TIME_LIMIT_NORMAL_FPS);
+    unpatch_memory(MVR_TIME_LIMIT_HIGH_FPS);
+#endif
+    int n_limit_patches = n_patches;
     for (int i = 0; i < n_long_clip; i++)
     {
-        patches[2 + i] = (struct patch) {
+        patches[n_limit_patches + i] = (struct patch) {
             .addr = (uint8_t *)long_clip[i].addr,
             .old_value = long_clip[i].old_value,
             .new_value = long_clip[i].new_value,
@@ -1088,9 +1207,8 @@ static void change_mov_time_limit(void* priv, int delta)
         n_patches += n_long_clip;
     #undef N_WRITER_PATCHES
     #undef N_PLAYBACK_PATCHES
+    #undef N_DISPLAY_PATCHES
     #undef N_LONG_CLIP_PATCHES
-    unpatch_memory((uint32_t)patches[0].addr);
-    unpatch_memory((uint32_t)patches[1].addr);
     if (mov_time_limit == 30 * 60)
     {
         return;

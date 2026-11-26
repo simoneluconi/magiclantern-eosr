@@ -24,11 +24,13 @@ Only features the R6 does not have already are enabled. Every new option starts 
 
 ### Movie > MOV/MP4 time limit
 
-- Choices: shorter limits, **29:59 (Canon)**, **45 min** and **59:59**.
+- Choices: shorter limits, **29:59 (Canon)**, **45 min**, **59:59**, **1:29:59** and **1:59:59**.
+- Up to 30p a clip can last up to 1:59:59. At 50/60p it stops at 59:59 at most.
+- The shooting screen shows the remaining time in minutes, for example 119:59, as Canon's recording counter does.
 - High Frame Rate (100/120p): with a limit above 29:59 it records up to 29:59; with 29:59 (Canon) or less it keeps Canon's 7:29. A 10-minute 100p clip was recorded and played on a PC; playback on the camera past 7:29 is not tested yet.
-- Above 29:59 ML also patches Canon's movie writer (its per-clip tables and the 8 MB index buffer). Without that the camera would stop with Err 70 after the limit, or leave an unplayable file.
+- Above 29:59 ML also patches Canon's movie writer (its per-clip tables, the audio tables and the 8 MB index buffer). Without that the camera would stop with Err 70 after the limit, or leave an unplayable file.
 - It also lets Canon's player open clips over 30 minutes; without that the camera says "Cannot playback movie".
-- Tested: a 60-minute FHD 50p clip on exFAT stopped at 59:59, played fine on a PC and plays back on the camera.
+- Tested: a 60-minute FHD 50p clip on exFAT stopped at 59:59, played fine on a PC and plays back on the camera. The 2-hour limits were tested at 1/16 scale (every table scaled down, clips stopped cleanly at the limit and played on the camera); a full 2-hour clip is not tested yet.
 - Don't trim clips over 30 minutes on the camera: Canon's movie editor keeps its own limits.
 - The limit can't be changed while recording. It takes effect from the next clip.
 - Heat still applies: in 4K the heat timer (below) or the temperature sensors may stop the clip earlier.
@@ -43,6 +45,15 @@ Only features the R6 does not have already are enabled. Every new option starts 
 
 - From the modules **opengate** (the whole sensor height: 4096x2736 in 3:2, or 3840x2880 in 4:3 for anamorphic lenses; 25p, 29.97p, 23.98p) and **fps24** (true 24.00p in 4K UHD). Load them in the **Modules** tab, then turn the entry on in the Movie menu. One at a time.
 - How to set the camera for each one is on its info screen: select the module in the **Modules** tab and press **Q**.
+
+### Movie > ALL-I
+
+- From the module **alli**. Turn it ON, then choose **For editing (ALL-I)** in Canon's Movie rec. quality menu: 4K UHD and FHD, 23.98p, 25p and 29.97p.
+- Also in Canon Log and HDR PQ (10-bit H.265, 4:2:2).
+- 4K ALL-I is 470 Mbps, about 60 MB/s: use a V90 card. FHD is 90 Mbps (135 Mbps in 10-bit).
+- Turn it OFF: once the ML menu is closed, an ALL-I setting goes back to IPB of the same size and rate. The same happens at start-up if the entry is OFF.
+- Not together with open gate.
+- Tested in Canon Log, 4K and FHD 25p: every frame is an I-frame (4K about 440 Mbps), and the clips play on the camera.
 
 ### Overlay > Cropmarks
 

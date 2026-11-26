@@ -56,7 +56,8 @@ ML_MODULES = \
     raw_video/raw_vidx \
     yolo \
     opengate \
-    fps24
+    fps24 \
+    alli
 
 .PHONY: clean $(BUILD_DIR)
 

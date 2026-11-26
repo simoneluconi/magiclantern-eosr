@@ -35,9 +35,10 @@
 #define CONFIG_SGI_HANDLERS
 #define CONFIG_MMU_REMAP
 
-// Movie menu: MOV/MP4 time limit (patches MVR_TIME_LIMIT_* at runtime),
-// up to MVR_TIME_LIMIT_MAX_SEC; above Canon's 29:59 the movie writer is
-// patched too (MVR_WRITER_PATCHES). The limit is not changed while
+// Movie menu: MOV/MP4 time limit (hooks MVR_TIME_LIMIT_FUNC at runtime),
+// up to MVR_TIME_LIMIT_MAX_SEC (MVR_TIME_LIMIT_MAX_HIGH_FPS_SEC at 50p /
+// 59.94p); above Canon's 29:59 the movie writer and the player are
+// patched too (MVR_WRITER_PATCHES, MVR_PLAYBACK_PATCHES). The limit is not changed while
 // RECORDING (from PROP_SHOOTING_TYPE, see internals.h); the ML menu does
 // not open while recording anyway.
 #define FEATURE_OVERRIDE_MOVIE_30_MIN_LIMIT

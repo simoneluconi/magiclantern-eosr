@@ -55,7 +55,7 @@ Behind it the MP4 writer has its own limits: fixed tables of 108000 entries per 
 
 ## What the ML options change
 
-- **Movie > MOV/MP4 time limit** changes the 29:59 constant, and above 29:59 also doubles the writer's tables (and the AAC table) and its index buffer (8 MB). The maximum is 59:59. Above 29:59, HFR also goes up to 29:59 (Canon's 7:29 there is the player's 30-minute frame check on the slow-motion clip); with 29:59 or less, HFR keeps 7:29. It also raises the player's 30-minute frame-count check, so the clips play back on the camera. A 60-minute clip was recorded, checked on a PC and played on the camera.
+- **Movie > MOV/MP4 time limit** replaces the 29:59 constant with one limit per frame rate, and above 29:59 also doubles the writer's tables and its index buffer (8 MB), and gives the audio its own, larger tables. The maximum is 1:59:59 up to 30p and 59:59 at 50/60p. Above 29:59, HFR also goes up to 29:59 (Canon's 7:29 there is the player's 30-minute frame check on the slow-motion clip); with 29:59 or less, HFR keeps 7:29. It also raises the player's 30-minute frame-count check, so the clips play back on the camera. A 60-minute clip was recorded, checked on a PC and played on the camera.
 - **Movie > Heat timer** multiplies the seconds of every row of the heat table (B) by 2, 3 or 4, so the budget drains more slowly. The stop flags, the temperature correction and the sensors (A) are unchanged. On camera, 2x halved the drain in 4K 25p.
 - Both work by replacing a few words of the firmware **in RAM** while ML runs (the MMU remaps those ROM pages). Nothing is written to the camera's firmware. With "Canon" selected, or without ML, the camera behaves as stock.
 
@@ -70,6 +70,6 @@ For developers. These are ROM0 addresses in firmware 1.9.0.
 - Temperature polling task `TempSvc` at E099B468, every 1000 ms. Status published as property 0x8004000F.
 - Decision function E04E9418. Sensor thresholds E04E9122. Heat budget E04E902A. Per-mode table E0D9CEA4 (24 entries).
 - Budget persistence: PROP_MOVIE_REMAIN_TIME 0x02050043 and PROP_MOVIE_REC_DATE 0x02050045 (refilled after more than 7200 s). "Overheat control" is probably 0x800000D8.
-- Clip limit: E074ECC6 returns 1799000 ms, or 449000 ms with HFR (pool words E074ED68 / E074F168). The check is in the movie record second-count handler (DlgLiveView).
-- MP4 writer: mp4wInitializeMmlibParam E05F07CA (capacity E05F0BE8, table sizes E05F0BE4 / 0BEC / 0BF0, AAC stsc size at E05F08D2), moov buffers E05F02B0, header compares E03A38D6 / E05EDAF0. Details in platform/R6.190/consts.h (MVR_WRITER_PATCHES).
+- Clip limit: E074ECC6 returns 1799000 ms, or 449000 ms with HFR (pool words E074ED68 / E074F168). The check is in the movie record second-count handler (DlgLiveView). ML hooks E074ECC6.
+- MP4 writer: mp4wInitializeMmlibParam E05F07CA (capacity E05F0BE8, table sizes E05F0BE4 / 0BEC / 0BF0, audio stsc size at E05F08D2), AAC sample check E03E6EB8, moov buffers E05F02B0, header compares E03A38D6 / E05EDAF0. Details in platform/R6.190/consts.h (MVR_WRITER_PATCHES).
 - Temperatures (°C + 128): 0x80030035 DRAM, 0x800300C6 / 0x8003008D MIMI L / R, 0x8003009E, 0x80030081 TFT, 0x80030062 SH. Remaining heat time 0x800000D9.

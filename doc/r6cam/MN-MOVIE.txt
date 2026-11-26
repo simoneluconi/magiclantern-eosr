@@ -4,14 +4,18 @@ Movie
 MOV/MP4 time limit
 ``````````````````
 
-Longest clip, up to **59:59**. Above 29:59, high frame rate goes up to 29:59. Heat can still stop a clip earlier. Trim long clips on a computer.
+Longest clip, up to **1:59:59** up to 30p. 50/60p goes up to 59:59, high frame rate up to 29:59. Heat can still stop a clip earlier. Trim long clips on a computer.
 
 Heat timer
 ``````````
 
 **2x / 3x / 4x** slow down Canon's 4K overheat timer. The temperature sensors still stop the camera.
 
-Open gate 4K and 24.00p
-```````````````````````
+Open gate 4K, 24.00p, ALL-I
+```````````````````````````
 
-From the modules **opengate** (the whole sensor height: 4096x2736 in 3:2, or 3840x2880 in 4:3 for anamorphic lenses) and **fps24** (true 24.00p in 4K UHD). One at a time.
+.. raw:: latex
+
+    \helplabel{Open gate 4K}\helplabel{24.00p}\helplabel{ALL-I}
+
+From the modules **opengate** (the whole sensor height: 4096x2736 in 3:2, or 3840x2880 in 4:3 for anamorphic lenses), **fps24** (true 24.00p in 4K UHD) and **alli** (Canon's ALL-I up to 30p; V90 card for 4K). Open gate is used alone.
