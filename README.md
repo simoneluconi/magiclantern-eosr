@@ -19,7 +19,7 @@ fork brings it to the R6, with extra video features.
 | 🎞️ | **Open&nbsp;gate&nbsp;4K** | Record the **whole sensor height**: 4096x2736 in 3:2, or 3840x2880 in 4:3 for anamorphic lenses. HEVC 4:2:2 10-bit with Canon Log, or H.264. 25p, 29.97p, 23.98p. Play the clips on a computer. *Module, experimental.* |
 | 🔭 | **Anamorphic&nbsp;preview** | See your anamorphic lens **desqueezed** on the screen and in the viewfinder, sharp and smooth, also while recording. 1.25x to 2x, with open gate 4:3 too. |
 | 🎬 | **True&nbsp;24.00p** | Cinema 24.00 fps in 4K UHD, with Canon's own 24.00p setting. *Module, experimental.* |
-| ✂️ | **ALL-I** | Canon's own **For editing (ALL-I)** in Movie rec. quality: 4K UHD and FHD up to 30p, also in Canon Log. 4K is 470 Mbps, use a V90 card. *Module, experimental.* |
+| ✂️ | **ALL-I** | Canon's own **For editing (ALL-I)**, hidden on the R6, now in Movie rec. quality: 4K UHD and FHD up to 30p, also in Canon Log. 4K is 470 Mbps, use a V90 card. |
 | ⏱️ | **Clips&nbsp;up&nbsp;to&nbsp;1:59:59** | Record for two hours in one clip up to 30p, and play it back on the camera. 50/60p up to 59:59, high frame rate (100/120p) up to 29:59. |
 | 🌡️ | **Heat&nbsp;timer** | **2x, 3x or 4x**: slows Canon's time-based 4K limit. The real temperature sensors still protect the camera. |
 | 💾 | **Format,&nbsp;keep&nbsp;ML** | Format the card from Canon's menu and ML is put back for you ("Format card, keep ML"). |
