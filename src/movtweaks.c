@@ -1222,10 +1222,21 @@ static void change_mov_time_limit(void* priv, int delta)
 #ifdef CONFIG_MMU_RUNTIME_PAGES_MAX
     // The runtime page pool is shared: a module enabled earlier in this boot
     // may have used its free pages. Grow it by what these patches still need
-    // (adds nothing if they fit); apply_patches() reports what fails.
-    mmu_reserve_pages_for_patches(patches, n_patches);
-#endif
+    // (adds nothing if they fit). Reserving and applying are not atomic: if
+    // another task took the free pages in between, reserve again once.
+    int err = 0;
+    for (int attempt = 0; attempt < 2; attempt++)
+    {
+        int r = mmu_reserve_pages_for_patches(patches, n_patches);
+        if (r)
+            printf("MOV time limit: page reserve %d\n", r);
+        err = apply_patches(patches, n_patches);
+        if (!(err & E_PATCH_BAD_MMU_PAGE))
+            break;
+    }
+#else
     int err = apply_patches(patches, n_patches);
+#endif
     if (err)
     {
         mov_time_limit = 30 * 60;

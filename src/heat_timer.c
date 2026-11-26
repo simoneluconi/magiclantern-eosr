@@ -149,10 +149,21 @@ static int heat_timer_set(int factor)
     };
 #ifdef CONFIG_MMU_RUNTIME_PAGES_MAX
     // the runtime page pool is shared with modules that may have used its
-    // free pages first: grow it by what this patch still needs
-    mmu_reserve_pages_for_patches(&patch, 1);
-#endif
+    // free pages first: grow it by what this patch still needs; reserving and
+    // applying are not atomic, so if another task took the free pages in
+    // between, reserve again once
+    for (int attempt = 0; attempt < 2; attempt++)
+    {
+        int r = mmu_reserve_pages_for_patches(&patch, 1);
+        if (r)
+            printf("Heat timer: page reserve %d\n", r);
+        err = apply_patches(&patch, 1);
+        if (!(err & E_PATCH_BAD_MMU_PAGE))
+            break;
+    }
+#else
     err = apply_patches(&patch, 1);
+#endif
     if (!err)
         heat_timer_applied = factor;
 
