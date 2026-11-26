@@ -59,6 +59,9 @@ static CONFIG_INT("alli.debug", ai_debug, 0);   /* REC log, saved */
 static const char * ai_why = "";                /* why the last apply / restore was refused */
 static int ai_in;                               /* patches applied */
 static int ai_restore_refused;                  /* Canon refused IPB with the entry OFF */
+static int ai_off_checked;                      /* with the entry OFF and no cells, the stored
+                                                 * kind was checked once (an ALL-I kind can
+                                                 * only be chosen with the cells in) */
 
 /* Canon's GUI calls (alli_r6_190.h) */
 static int (*const ai_get_kind)(uint32_t * kind) = (void *) AI_GET_KIND;
@@ -298,7 +301,7 @@ static void ai_task(void * unused)
         ai_rec_log();
         if (!ai_can_change()) continue;
 
-        if (ai_ui) ai_restore_refused = 0;     /* try again after the next OFF */
+        if (ai_ui) ai_restore_refused = ai_off_checked = 0;    /* check again after the next OFF */
 
         if (ai_ui && ai_opengate_in())
         {
@@ -316,12 +319,13 @@ static void ai_task(void * unused)
             else NotifyBox(5000, "ALL-I ready: Movie rec. quality,\n"
                                  "\"For editing (ALL-I)\", up to 30p.");
         }
-        else if (!ai_ui && !ai_restore_refused)
+        else if (!ai_ui && !ai_restore_refused && (ai_in || !ai_off_checked))
         {
-            /* an ALL-I setting goes back to IPB first, then the cells; also at boot with
-             * the entry OFF */
+            /* an ALL-I setting goes back to IPB first, then the cells; also once at boot
+             * with the entry OFF. Without the cells nothing can choose ALL-I again, so
+             * Canon's setting is not polled after that */
             int r = ai_restore();
-            if (r == 1) ai_remove();
+            if (r == 1) { ai_remove(); ai_off_checked = 1; }
             else if (r < 0 && ai_in)
             {
                 /* the ALL-I cell stays, so Canon's menu still shows what is set */
