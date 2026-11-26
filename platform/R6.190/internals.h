@@ -154,11 +154,11 @@
  * except the two TTBR0 L1 entries at +0x4800 / +0x4880 (checked on camera). */
 #define CONFIG_MMU
 
-/** Remapped 64 KiB pages for ROM patches: one reserved at boot, six more
+/** Remapped 64 KiB pages for ROM patches: one reserved at boot, seven more
  * taken from Canon's AllocateMemory pool after boot (src/patch_mmu.c).
- * In use: time limit 0xE074, movie writer 0xE05F / 0xE03A / 0xE05E, player
- * 0xE04E, heat timer 0xE0D9, dial hook 0xE02E (mmu_patches.h, applied
- * first, so it takes the boot page); none spare.
+ * In use: time limit 0xE074, movie writer 0xE05F / 0xE03A / 0xE03E /
+ * 0xE05E, player 0xE04E, heat timer 0xE0D9, dial hook 0xE02E
+ * (mmu_patches.h, applied first, so it takes the boot page); none spare.
  * The boot space comes out of DryOS user_mem, only 1.07 MB on R6
  * (0x190098 + 0x112D70, cstart 0xE0100146), which must keep 0x80010 bytes
  * (cstart 0xE0100120; init_task and boot-d678.c check it): with two pages
@@ -168,14 +168,15 @@
  * it up (0x12C9000) did not start either.
  * The runtime L2 tables live with the runtime pages in AllocateMemory; the
  * boot space only keeps a small struct per table (76 bytes), so room for
- * 14 tables costs about 1 KB of user_mem. Up to 18 more pages can be taken
+ * 14 tables costs about 1 KB of user_mem. Up to 17 more pages can be taken
  * on demand (mmu_reserve_pages_for_patches()) by a feature when it is
  * enabled; none at boot. Pages stay mapped once used, so they are reused
  * when the feature is enabled again, and the pool must hold every feature
- * used in one boot: opengate 11 pages, fps24 6, so 23 with the boot pages,
- * in 12 sections (1.1 MB more of AllocateMemory once both were used). */
+ * used in one boot: opengate 11 pages, fps24 6 (0xE1F1 is in both), so 23
+ * of the 24 with the boot pages, in 13 sections (1.1 MB more of
+ * AllocateMemory once both were used). */
 #define CONFIG_MMU_REMAP_PAGES 1
-#define CONFIG_MMU_RUNTIME_PAGES 6
+#define CONFIG_MMU_RUNTIME_PAGES 7
 #define CONFIG_MMU_RUNTIME_PAGES_MAX 24
 #define CONFIG_MMU_RUNTIME_L2_TABLES 14
 #define CONFIG_MAX_PATCHES 48
