@@ -929,11 +929,14 @@ static uint32_t __attribute__((used, noinline)) mov_time_limit_hook(void)
     // still the return address in Canon's caller
     uint32_t caller = (uint32_t) __builtin_return_address(0);
     uint32_t ms = mov_time_limit_for_mode();
-#ifdef MVR_TIME_LIMIT_STOP_CALLER
-    // Canon's display has no hours: only the clip-stop check gets the
-    // real limit, the display at most MVR_TIME_LIMIT_DISPLAY_MAX_SEC (consts.h)
-    if ((caller & ~1) != MVR_TIME_LIMIT_STOP_CALLER)
-        ms = MIN(ms, MVR_TIME_LIMIT_DISPLAY_MAX_SEC * 1000);
+#ifdef MVR_TIME_LIMIT_FULL_CALLERS
+    // Canon's displays have no hours: the callers known to handle the real
+    // limit get it, any other at most MVR_TIME_LIMIT_DISPLAY_MAX_SEC (consts.h)
+    static const uint32_t full_callers[] = MVR_TIME_LIMIT_FULL_CALLERS;
+    for (int i = 0; i < COUNT(full_callers); i++)
+        if ((caller & ~1) == full_callers[i])
+            return ms;
+    ms = MIN(ms, MVR_TIME_LIMIT_DISPLAY_MAX_SEC * 1000);
 #else
     (void) caller;
 #endif
@@ -1096,9 +1099,10 @@ static void change_mov_time_limit(void* priv, int delta)
     if (mov_time_limit == MOV_TIME_LIMIT_OFF || mov_time_limit > hfr_max_sec)
         hfr_limit_ms = hfr_max_sec * 1000;
 #endif
-    // Above Canon's limit, the movie writer's own limits (MVR_WRITER_PATCHES)
-    // and those of Canon's player for longer clips (MVR_PLAYBACK_PATCHES)
-    // are patched too, if the camera defines them (see consts.h).
+    // Above Canon's limit, the movie writer's own limits (MVR_WRITER_PATCHES),
+    // those of Canon's player for longer clips (MVR_PLAYBACK_PATCHES) and
+    // Canon's remaining-time display (MVR_DISPLAY_PATCHES) are patched too,
+    // if the camera defines them (see consts.h).
     struct long_clip_patch { uint32_t addr, old_value, new_value, is_instruction; const char * what; };
 #ifdef MVR_WRITER_PATCHES
     static const struct { uint32_t addr, old_value, new_value, is_instruction; }
@@ -1114,7 +1118,14 @@ static void change_mov_time_limit(void* priv, int delta)
 #else
     #define N_PLAYBACK_PATCHES 0
 #endif
-    #define N_LONG_CLIP_PATCHES (N_WRITER_PATCHES + N_PLAYBACK_PATCHES)
+#ifdef MVR_DISPLAY_PATCHES
+    static const struct { uint32_t addr, old_value, new_value, is_instruction; }
+        display_patches[] = MVR_DISPLAY_PATCHES;
+    #define N_DISPLAY_PATCHES COUNT(display_patches)
+#else
+    #define N_DISPLAY_PATCHES 0
+#endif
+    #define N_LONG_CLIP_PATCHES (N_WRITER_PATCHES + N_PLAYBACK_PATCHES + N_DISPLAY_PATCHES)
     struct long_clip_patch long_clip[N_LONG_CLIP_PATCHES + 1];
     int n_long_clip = 0;
 #ifdef MVR_WRITER_PATCHES
@@ -1131,6 +1142,14 @@ static void change_mov_time_limit(void* priv, int delta)
         long_clip[n_long_clip++] = (struct long_clip_patch) {
             playback_patches[i].addr, playback_patches[i].old_value, playback_patches[i].new_value,
             playback_patches[i].is_instruction, "MOV time limit: playback" };
+    }
+#endif
+#ifdef MVR_DISPLAY_PATCHES
+    for (int i = 0; i < N_DISPLAY_PATCHES; i++)
+    {
+        long_clip[n_long_clip++] = (struct long_clip_patch) {
+            display_patches[i].addr, display_patches[i].old_value, display_patches[i].new_value,
+            display_patches[i].is_instruction, "MOV time limit: display" };
     }
 #endif
     struct patch patches[2 + N_LONG_CLIP_PATCHES] = {};
@@ -1188,6 +1207,7 @@ static void change_mov_time_limit(void* priv, int delta)
         n_patches += n_long_clip;
     #undef N_WRITER_PATCHES
     #undef N_PLAYBACK_PATCHES
+    #undef N_DISPLAY_PATCHES
     #undef N_LONG_CLIP_PATCHES
     if (mov_time_limit == 30 * 60)
     {

@@ -343,12 +343,19 @@ extern int winsys_bmp_dirty_bit_neg;
 #define MVR_TIME_LIMIT_FUNC 0xE074ECC6
 #define MVR_TIME_LIMIT_FUNC_CODE { 0x10, 0xB5, 0x5A, 0xF0, 0x8F, 0xFE, 0x01, 0x28 } /* push {r4,lr}; bl 0xE07A99EA; cmp r0,#1 */
 #define MVR_IS_HIGH_FRAME_RATE() (((int (*)(void)) 0xE07A99EB)() == 1) /* Canon's own test, Thumb */
-// Return address of the clip-stop check's call (bl at 0xE0BD265A). The other
-// callers only cap the remaining-time display, which shows minutes:seconds
-// with no hours: on camera, a 1:29:59 limit showed as 30 min. They get at
-// most MVR_TIME_LIMIT_DISPLAY_MAX_SEC (59:59), as Canon shows when the card
-// holds more than the limit; only the stop check gets the real limit.
-#define MVR_TIME_LIMIT_STOP_CALLER     0xE0BD265E
+// Callers that get the real limit, by return address. These are the only
+// three bl sites in the ROM, and no data pointer to the function exists:
+// - 0xE0BD265E: the clip-stop check (bl at 0xE0BD265A);
+// - 0xE08CD038: the remaining time, min(card, limit / 1000) (0xE08CD028),
+//   for the shooting-screen time item (0xE060B6CE, shows minutes with
+//   MVR_DISPLAY_PATCHES), OlcRecordTime (0xE096CAB6, clamps to 59:59 by
+//   itself) and the record-start checks (0xE074D484, 0xE074D53E, 0xE08CD06C);
+// - 0xE08CCF9A: the card remaining time (0xE08CCF32) in the state where
+//   Canon shows the limit instead (GUI+0x4C == 1); its only live caller
+//   is 0xE08CD028 above.
+// Any other caller would get at most MVR_TIME_LIMIT_DISPLAY_MAX_SEC (59:59),
+// which every minutes:seconds display can show.
+#define MVR_TIME_LIMIT_FULL_CALLERS    { 0xE0BD265E, 0xE08CD038, 0xE08CCF9A }
 #define MVR_TIME_LIMIT_DISPLAY_MAX_SEC (60 * 60 - 1)
 
 // The MP4 writer limits the clip length too. mp4wInitializeMmlibParam
@@ -402,7 +409,7 @@ extern int winsys_bmp_dirty_bit_neg;
 // 59:59 with a 4.46 MB moov and checked fine on a PC (ffprobe, ffmpeg).
 // Canon's player refused it, see MVR_PLAYBACK_PATCHES.
 // Pages: 0xE05F0000, 0xE03A0000, 0xE03E0000, 0xE05E0000; with the time
-// limit, the player and the heat timer, 7 remapped pages
+// limit, the player, the time display and the heat timer, 8 remapped pages
 // (CONFIG_MMU_RUNTIME_PAGES in internals.h).
 #define MVR_WRITER_PATCHES { \
     { 0xE05F0BE4,     864000,    1728000, 0 }, /* 8-byte tables x2 */ \
@@ -436,6 +443,20 @@ extern int winsys_bmp_dirty_bit_neg;
     { 0xE04EB8F4, 0x0094F64A, 0x2080F44F, 1 }, /* 23.976p: 43156 -> 262144 */ \
     { 0xE04EB904, 0x20BAF24D, 0x2080F44F, 1 }, /* 29.97p: 53946 -> 262144 */ \
     { 0xE04EBBB4, 0x0001A574, 0x00080000, 0 }, /* 59.94p: 107892 -> 524288 */ \
+}
+
+// The shooting-screen time item (LiveView item 0x3B, 0xE060B6CE) prints
+// "%02d:%02d". While recording it shows the elapsed time in total minutes
+// (61:00, 119:59). In standby it shows the remaining time with minutes % 60
+// (divmod by 60 twice at 0xE060B76A..0xE060B77B), so a 1:29:59 limit read
+// 29:59. MVR_DISPLAY_PATCHES (applied with MVR_WRITER_PATCHES) drop the
+// second divmod: standby also shows total minutes (89:59, 119:59), the same
+// 5 characters. r0 is the quotient of the first divmod; r3 = seconds is set
+// next (0xE060B77C) and r1 is not read after. No code branches into
+// 0xE060B776..0xE060B77D. Page 0xE0600000.
+#define MVR_DISPLAY_PATCHES { \
+    { 0xE060B774, 0xF0D6213C, 0xBF004602, 1 }, /* movs r1,#60; blx.. -> mov r2,r0; nop */ \
+    { 0xE060B778, 0x460AEC9A, 0xBF00BF00, 1 }, /* ..divmod; mov r2,r1 -> nop; nop */ \
 }
 
 // Longest limits, given MVR_WRITER_PATCHES (216000 frames): 2 h (1:59:59)
