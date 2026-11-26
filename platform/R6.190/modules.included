@@ -2,7 +2,9 @@
 # file_man: file browser (it can also delete files, on request only)
 # lua: scripting; some calls need property writes, which R6 refuses
 # opengate: whole-sensor 4K (4096x2736); fps24: true 24.00p in 4K UHD
+# alli: Canon's ALL-I in Movie rec. quality, up to 30p
 file_man
 lua
 opengate
 fps24
+alli
