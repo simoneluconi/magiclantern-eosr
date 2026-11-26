@@ -46,6 +46,15 @@ Only features the R6 does not have already are enabled. Every new option starts 
 - From the modules **opengate** (the whole sensor height: 4096x2736 in 3:2, or 3840x2880 in 4:3 for anamorphic lenses; 25p, 29.97p, 23.98p) and **fps24** (true 24.00p in 4K UHD). Load them in the **Modules** tab, then turn the entry on in the Movie menu. One at a time.
 - How to set the camera for each one is on its info screen: select the module in the **Modules** tab and press **Q**.
 
+### Movie > ALL-I
+
+- From the module **alli**. Turn it ON, then choose **For editing (ALL-I)** in Canon's Movie rec. quality menu: 4K UHD and FHD, 23.98p, 25p and 29.97p.
+- Also in Canon Log and HDR PQ (10-bit H.265, 4:2:2).
+- 4K ALL-I is 470 Mbps, about 60 MB/s: use a V90 card. FHD is 90 Mbps (135 Mbps in 10-bit).
+- Turn it OFF in LiveView with the ML menu closed: an ALL-I setting goes back to IPB of the same size and rate. The same happens at start-up if the entry is OFF.
+- Not together with open gate.
+- Not tested on camera yet.
+
 ### Overlay > Cropmarks
 
 - Framing lines over the LiveView, from the bitmaps in `ML/CROPMKS` on the card. Press **Q** on the entry to choose one; you can add your own BMPs.
