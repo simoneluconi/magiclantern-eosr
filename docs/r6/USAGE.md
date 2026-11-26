@@ -24,11 +24,12 @@ Only features the R6 does not have already are enabled. Every new option starts 
 
 ### Movie > MOV/MP4 time limit
 
-- Choices: shorter limits, **29:59 (Canon)**, **45 min** and **59:59**.
+- Choices: shorter limits, **29:59 (Canon)**, **45 min**, **59:59**, **1:29:59** and **1:59:59**.
+- Up to 30p a clip can last up to 1:59:59. At 50/60p it stops at 59:59 at most.
 - High Frame Rate (100/120p): with a limit above 29:59 it records up to 29:59; with 29:59 (Canon) or less it keeps Canon's 7:29. A 10-minute 100p clip was recorded and played on a PC; playback on the camera past 7:29 is not tested yet.
-- Above 29:59 ML also patches Canon's movie writer (its per-clip tables and the 8 MB index buffer). Without that the camera would stop with Err 70 after the limit, or leave an unplayable file.
+- Above 29:59 ML also patches Canon's movie writer (its per-clip tables, the audio tables and the 8 MB index buffer). Without that the camera would stop with Err 70 after the limit, or leave an unplayable file.
 - It also lets Canon's player open clips over 30 minutes; without that the camera says "Cannot playback movie".
-- Tested: a 60-minute FHD 50p clip on exFAT stopped at 59:59, played fine on a PC and plays back on the camera.
+- Tested: a 60-minute FHD 50p clip on exFAT stopped at 59:59, played fine on a PC and plays back on the camera. 2-hour clips are not tested on camera yet.
 - Don't trim clips over 30 minutes on the camera: Canon's movie editor keeps its own limits.
 - The limit can't be changed while recording. It takes effect from the next clip.
 - Heat still applies: in 4K the heat timer (below) or the temperature sensors may stop the clip earlier.
