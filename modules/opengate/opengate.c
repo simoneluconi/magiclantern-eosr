@@ -19,8 +19,10 @@
  * size, rate, crop or recording setup removes the patches from the property handler,
  * before Canon restarts the movie LiveView; the next safe point re-applies them.
  *
- * Canon's in-camera player cannot show these clips yet (its ORCA resize stops the camera
- * on 2736 rows; research/opengate/player/PLAYER-2736.md, branch r6.190-opengate-research).
+ * Canon's in-camera player refuses these clips, and its ORCA resize stops the camera on
+ * them. The Playback entry (own patch set, any open gate mode, ON by default) lets the
+ * player open them, makes its resize read every second line of the whole frame and keeps
+ * the resize's split parts at an even width (research/opengate/player/PLAYER-2736-v2.md).
  *
  * Values and their sources: og_r6_190.h.
  */
@@ -81,18 +83,20 @@ static struct semaphore * og_lock;      /* worker task vs. property handler remo
  * ------------------------------------------------------------------------ */
 
 static volatile int og_in_handler;      /* set while a property handler runs: no file access */
+static struct semaphore * og_log_lock;  /* the worker and the playback diagnostics task log */
 
 static void og_log(const char * fmt, ...)
 {
     /* no card access while Canon shuts down: the LV stop at power off logs a line, and a
      * write racing the card shutdown is the suspect of two power-off hangs (run 53) */
     if (!og_debug || og_in_handler || ml_shutdown_requested) return;
-    char buf[200];
+    char buf[240];
     va_list ap;
     va_start(ap, fmt);
     int n = snprintf(buf, sizeof(buf), "%d ", get_ms_clock());
     vsnprintf(buf + n, sizeof(buf) - n, fmt, ap);
     va_end(ap);
+    if (og_log_lock && take_semaphore(og_log_lock, 500) != 0) return;
     FILE * f = FIO_CreateFileOrAppend("ML/LOGS/OPENGATE.LOG");
     if (f)
     {
@@ -100,6 +104,7 @@ static void og_log(const char * fmt, ...)
         FIO_WriteFile(f, "\n", 1);
         FIO_CloseFile(f);
     }
+    if (og_log_lock) give_semaphore(og_log_lock);
 }
 
 /* ------------------------------------------------------------------------
@@ -345,26 +350,28 @@ static void og_add_words(const struct og_word * w, int n)
  * MAX_PATCHES is 48 on R6 and the 60-min clip option alone takes 15 (RESULTS run 44) */
 #define OG_MERGE_GAP 0x100
 
-static int og_apply_rom(void)
+/* one all-or-nothing patch set from a word list (the open gate's, or the player's below);
+ * patch_addr receives the addresses to unpatch */
+static int og_apply_words(const struct og_word * words, int n, uint32_t * patch_addr, int * n_patch)
 {
-    int n = og_n_rom;
     int idx[OG_MAX_ROM];
+    if (n > OG_MAX_ROM) return E_PATCH_TOO_MANY_PATCHES;
     for (int i = 0; i < n; i++) idx[i] = i;
     for (int i = 0; i < n; i++)
         for (int j = i + 1; j < n; j++)
-            if (og_rom[idx[j]].addr < og_rom[idx[i]].addr) { int t = idx[i]; idx[i] = idx[j]; idx[j] = t; }
+            if (words[idx[j]].addr < words[idx[i]].addr) { int t = idx[i]; idx[i] = idx[j]; idx[j] = t; }
 
     struct patch p[OG_MAX_ROM];
     uint8_t * bufs[OG_MAX_ROM];
     int np = 0, err = 0;
     for (int i = 0; i < n && !err; )
     {
-        uint32_t start = og_rom[idx[i]].addr, end = start + 4;
+        uint32_t start = words[idx[i]].addr, end = start + 4;
         int k = i + 1;
-        while (k < n && (og_rom[idx[k]].addr & 0xFFFF0000) == (start & 0xFFFF0000)
-               && og_rom[idx[k]].addr >= end && og_rom[idx[k]].addr - end < OG_MERGE_GAP)
+        while (k < n && (words[idx[k]].addr & 0xFFFF0000) == (start & 0xFFFF0000)
+               && words[idx[k]].addr >= end && words[idx[k]].addr - end < OG_MERGE_GAP)
         {
-            end = og_rom[idx[k]].addr + 4;
+            end = words[idx[k]].addr + 4;
             k++;
         }
         uint32_t len = end - start;
@@ -376,7 +383,7 @@ static int og_apply_rom(void)
         int insn = 0;
         for (int m = i; m < k; m++)
         {
-            const struct og_word * w = &og_rom[idx[m]];
+            const struct og_word * w = &words[idx[m]];
             uint32_t off = w->addr - start;
             if (*(uint32_t *) (oldb + off) != w->stock)
             {
@@ -389,19 +396,20 @@ static int og_apply_rom(void)
         if (len == 4)
             p[np] = (struct patch) { .addr = (uint8_t *) start, .old_value = *(uint32_t *) oldb,
                                      .new_value = *(uint32_t *) newb, .size = 4, .is_instruction = insn,
-                                     .description = og_rom[idx[i]].what };
+                                     .description = words[idx[i]].what };
         else
             p[np] = (struct patch) { .addr = (uint8_t *) start, .old_values = oldb, .new_values = newb,
-                                     .size = len, .is_instruction = insn, .description = og_rom[idx[i]].what };
-        og_rom_patch[np] = start;
+                                     .size = len, .is_instruction = insn, .description = words[idx[i]].what };
+        patch_addr[np] = start;
         np++;
         i = k;
     }
     /* runtime MMU pages for what these patches still need (pages remapped before, by us or
      * another feature, are reused: a re-enable adds nothing) */
     /* the core allocates in small blocks (no ~700 KB AllocateMemory block: one failed once,
-     * run 42) and keeps what it added if one fails */
-    if (!err)
+     * run 42) and keeps what it added if one fails. Reserving and applying are not atomic:
+     * if another task took the free pages in between, reserve again once (as heat_timer.c) */
+    for (int attempt = 0; attempt < 2 && !err; attempt++)
     {
         int mem0 = og_mem_free();
         int e = mmu_reserve_pages_for_patches(p, np);
@@ -409,23 +417,35 @@ static int og_apply_rom(void)
         /* free memory unchanged: no page added (all reused) */
         og_log("mmu_reserve_pages_for_patches(%d) = %d, AllocateMemory free %d -> %d (%d)",
                np, e, mem0, mem1, mem1 - mem0);
-        if (e) err = OG_E_NO_PAGES;
+        if (e) { err = OG_E_NO_PAGES; break; }
+        err = apply_patches(p, np);         /* copies the arrays; all or nothing */
+        if (!(err & E_PATCH_BAD_MMU_PAGE)) break;
+        if (attempt == 0) err = 0;          /* retry */
     }
-    if (!err) err = apply_patches(p, np);   /* copies the arrays; all or nothing */
     for (int b = 0; b < np; b++) free(bufs[b]);
     og_log("rom: %d words in %d patches: %x", n, np, err);
-    og_n_rom_patch = err ? 0 : np;
+    *n_patch = err ? 0 : np;
     return err;
+}
+
+static void og_unpatch_all(uint32_t * patch_addr, int * n_patch)
+{
+    for (int i = *n_patch - 1; i >= 0; i--)
+    {
+        int e = unpatch_memory(patch_addr[i]);
+        if (e) og_log("unpatch %08x: %x", patch_addr[i], e);
+    }
+    *n_patch = 0;
+}
+
+static int og_apply_rom(void)
+{
+    return og_apply_words(og_rom, og_n_rom, og_rom_patch, &og_n_rom_patch);
 }
 
 static void og_remove_rom(void)
 {
-    for (int i = og_n_rom_patch - 1; i >= 0; i--)
-    {
-        int e = unpatch_memory(og_rom_patch[i]);
-        if (e) og_log("unpatch %08x: %x", og_rom_patch[i], e);
-    }
-    og_n_rom_patch = 0;
+    og_unpatch_all(og_rom_patch, &og_n_rom_patch);
 }
 
 static int og_check_ram(void)
@@ -807,6 +827,538 @@ static void og_finish_deferred(void)
     int left = og_restore_ram(1);
     og_pending_deferred = left > 0;
     og_log("deferred restore: %d words left", left);
+}
+
+/* ------------------------------------------------------------------------
+ * Canon's player and the open gate clips (og_r6_190.h, og_pb_words; PLAYER-2736-v2.md).
+ * Its own patch set and menu entry, independent of the open gate mode, applied while the
+ * module is loaded and the entry is on, so old clips play with the open gate OFF too.
+ * Applied and removed only outside playback (Canon's player is not set up then).
+ *
+ * The functions below run inside Canon's player code (its tasks), reached by a bl from the
+ * patched site to an 8-byte jump in the cave, and return with bx lr to the instruction
+ * after the site. Each one does what the replaced instructions did, with Canon's values for
+ * clips of 2160 rows or less, and uses only the registers noted (checked dead at the site,
+ * pbwords.py). og_pb_diag counts what they did, for the debug log.
+ * ------------------------------------------------------------------------ */
+
+struct og_pb_diag
+{
+    uint32_t d_count, d_w, d_h;     /* +0  resize set-ups of a tall clip, last w / h */
+    uint32_t fit_count;             /* +12 display fits of a tall clip */
+    uint32_t k_pass, k_refuse;      /* +16 ChkFrameRate: tall sizes let through / refused */
+    uint32_t k_w, k_h;              /* +24 last size seen there (not 2160 rows) */
+    uint32_t rot_tall;              /* +32 convert-buffer steps of a tall clip (2 buffers) */
+    uint32_t n_count, n_h;          /* +36 decoded-frame set-ups of a tall clip (4 frames), last h */
+};
+struct og_pb_diag og_pb_diag __attribute__((used));    /* written by the asm below */
+
+#define OG_STR2(x) #x
+#define OG_STR(x) OG_STR2(x)
+
+extern void og_pb_K(void), og_pb_N(void), og_pb_W(void), og_pb_R(void), og_pb_D(void), og_pb_T(void),
+            og_pb_F(void);
+
+/* Thumb-2 (Canon's code is Thumb-2; the module is built for ARMv5TE, so the block sets the
+ * CPU for itself and goes back to ARM mode at the end) */
+asm(
+    ".text\n"
+    ".syntax unified\n"
+    ".cpu cortex-a9\n"
+    ".thumb\n"
+    ".align 2\n"
+
+    /* K, at ChkFrameRate's 4096 and 3840 size checks, for "cmp r1, r4; bne refuse":
+     * r0 = width, r1 = height, r4 = 2160. 2160 rows go on as before; 4096x2736 and
+     * 3840x2880 go on to Canon's frame-rate checks; anything else returns to Canon's
+     * refusal (log "W=%ld,H=%ld", return 1). r0, r1 are kept (the refusal logs them) */
+    ".global og_pb_K\n"
+    ".type og_pb_K, %function\n"
+    ".thumb_func\n"
+    "og_pb_K:\n"
+    "    cmp     r1, r4\n"
+    "    beq     9f\n"
+    "    push    {r2, r3}\n"
+    "    ldr     r2, =og_pb_diag\n"
+    "    str     r0, [r2, #24]\n"
+    "    str     r1, [r2, #28]\n"
+    "    cmp.w   r0, #0x1000\n"
+    "    bne     1f\n"
+    "    cmp.w   r1, #2736\n"
+    "    b       2f\n"
+    "1:  cmp.w   r1, #2880\n"               /* width 3840: only the two sites call K */
+    "2:  beq     3f\n"
+    "    ldr     r3, [r2, #20]\n"
+    "    adds    r3, #1\n"
+    "    str     r3, [r2, #20]\n"
+    "    pop     {r2, r3}\n"
+    "    ldr.w   lr, =" OG_STR(OG_PB_REFUSE) "\n"
+    "    bx      lr\n"
+    "3:  ldr     r3, [r2, #16]\n"
+    "    adds    r3, #1\n"
+    "    str     r3, [r2, #16]\n"
+    "    pop     {r2, r3}\n"
+    "    cmp     r1, r1\n"                  /* Z = 1, as after Canon's equal compare */
+    "9:  bx      lr\n"
+
+    /* N, in the decoded-frame set-up, for "movs r0, #6; str r0, [r5, #0x18]": r9 = the
+     * movie info {w, h, ...}, r5 = the frame set. 4 frames above 2160 rows. r0 (r1, r2
+     * saved); the kept "str r0, [sp]" after the site passes the same count to the allocator */
+    ".global og_pb_N\n"
+    ".type og_pb_N, %function\n"
+    ".thumb_func\n"
+    "og_pb_N:\n"
+    "    ldr.w   r0, [r9, #4]\n"
+    "    cmp.w   r0, #2160\n"
+    "    bls     1f\n"
+    "    push    {r1, r2}\n"
+    "    ldr     r2, =og_pb_diag\n"
+    "    str     r0, [r2, #40]\n"
+    "    ldr     r1, [r2, #36]\n"
+    "    adds    r1, #1\n"
+    "    str     r1, [r2, #36]\n"
+    "    pop     {r1, r2}\n"
+    "    movs    r0, #4\n"
+    "    b       2f\n"
+    "1:  movs    r0, #6\n"
+    "2:  str     r0, [r5, #0x18]\n"
+    "    bx      lr\n"
+
+    /* T, in MVP_CheckTransCodeFile (Compress & save), for "ldr.w r3, [r0, #0x9c0]": r0 = the
+     * player, r3 = the width for Canon's compares that follow (8192, 4096 = refused). Above
+     * 2160 rows r3 = 4096, so Canon refuses these clips as it refuses DCI. r3 only */
+    ".global og_pb_T\n"
+    ".type og_pb_T, %function\n"
+    ".thumb_func\n"
+    "og_pb_T:\n"
+    "    ldr.w   r3, [r0, #0x9c4]\n"
+    "    cmp.w   r3, #2160\n"
+    "    bhi     1f\n"
+    "    ldr.w   r3, [r0, #0x9c0]\n"
+    "    bx      lr\n"
+    "1:  mov.w   r3, #0x1000\n"
+    "    bx      lr\n"
+
+    /* F, at the start of Canon's display fit E04035B8, reached by b.w (lr = its caller):
+     * r0 = the movie info {w, h}, r1 = the display boxes (4 x 0x40; +0x28 the fitted out w
+     * for the display), r3 = the resize channel records (4 x 0x1c: enabled, VRAM w, out w,
+     * ...), [sp] = the 5th argument. For a clip taller than 2160 rows Canon's fit runs as a
+     * call (its push.w, then its code; the 5th argument pushed again for it), then each
+     * enabled output width is rounded down to a multiple of 4 in both the resize record and
+     * the display box, so they agree: the resize's 2x2 split halves the width, and a part of
+     * odd width kills the camera (3:2 in the 900x600 LCD box: 898, parts 449). Other clips:
+     * Canon's push.w and on. r0, r1 as Canon returns them; r2, r3, ip */
+    ".global og_pb_F\n"
+    ".type og_pb_F, %function\n"
+    ".thumb_func\n"
+    "og_pb_F:\n"
+    "    ldr.w   ip, [r0, #4]\n"
+    "    cmp.w   ip, #2160\n"
+    "    bls     og_pb_fit\n"
+    "    push    {r1, r3, lr}\n"
+    "    ldr     ip, [sp, #12]\n"           /* the 5th argument */
+    "    push    {ip}\n"                    /* again at [sp]: 16 bytes, still 8-aligned */
+    "    bl      og_pb_fit\n"
+    "    add     sp, #4\n"
+    "    pop     {r1, r3, lr}\n"
+    "    push    {r0, r1, r4, r5}\n"
+    "    ldr     r2, =og_pb_diag\n"
+    "    ldr     r4, [r2, #12]\n"
+    "    adds    r4, #1\n"
+    "    str     r4, [r2, #12]\n"
+    "    movs    r4, #4\n"
+    "1:  ldr     r5, [r3]\n"
+    "    cbz     r5, 2f\n"
+    "    ldr     r5, [r3, #8]\n"
+    "    bic     r5, r5, #3\n"
+    "    str     r5, [r3, #8]\n"
+    "    str     r5, [r1, #0x28]\n"
+    "2:  adds    r3, #0x1c\n"
+    "    adds    r1, #0x40\n"
+    "    subs    r4, #1\n"
+    "    bne     1b\n"
+    "    pop     {r0, r1, r4, r5}\n"
+    "    bx      lr\n"
+    "og_pb_fit:\n"                          /* Canon's fit: its push.w, then its code */
+    "    push.w  {r0, r1, r2, r3, r4, r5, r6, r7, r8, sb, sl, fp, ip, lr}\n"
+    "    ldr.w   pc, =" OG_STR(OG_PB_FIT_RET) "\n"
+
+    /* W (producer, for "ldr.w r0, [r4, #0x908]; adds r0, #1") and R (consumer, for
+     * "movs r1, #3; ldr.w r0, [r4, #0x914]"): r4 = the player, r0 = the next index, r1 = the
+     * number of convert buffers for the modulo that follows: 2 above 2160 rows, else 3.
+     * r0, r1 (r2, r3 saved) */
+    ".global og_pb_W\n"
+    ".type og_pb_W, %function\n"
+    ".thumb_func\n"
+    "og_pb_W:\n"
+    "    ldr.w   r0, [r4, #0x908]\n"
+    "    adds    r0, #1\n"
+    "    b       og_pb_mod\n"
+    ".global og_pb_R\n"
+    ".type og_pb_R, %function\n"
+    ".thumb_func\n"
+    "og_pb_R:\n"
+    "    ldr.w   r0, [r4, #0x914]\n"
+    "og_pb_mod:\n"
+    "    ldr.w   r1, [r4, #0x9c4]\n"        /* the movie height (info at +0x9C0) */
+    "    cmp.w   r1, #2160\n"
+    "    bhi     1f\n"
+    "    movs    r1, #3\n"
+    "    bx      lr\n"
+    "1:  push    {r2, r3}\n"
+    "    ldr     r2, =og_pb_diag\n"
+    "    ldr     r3, [r2, #32]\n"
+    "    adds    r3, #1\n"
+    "    str     r3, [r2, #32]\n"
+    "    pop     {r2, r3}\n"
+    "    movs    r1, #2\n"
+    "    bx      lr\n"
+
+    /* D, in the resize set-up (rsz mode 0), for "ldr r0, [r4]; str r0, [sp];
+     * ldr r0, [r4, #4]; str r0, [sp, #4]": r4 = the input {w, h}, [sp] = the first two
+     * words sent to ORCA (input line pitch and rows; Canon then copies them to the work
+     * size, the region ORCA scales). Above 2160 rows: pitch 2w, rows h/2, region w x h/2:
+     * ORCA reads every second line of the whole frame (2x2 split into w/2 x h/4 parts,
+     * smaller than a DCI clip's); Canon's display fit, from the movie info, keeps the aspect.
+     * The input height is set to the new one, so Canon's work-size copy follows it. The
+     * output widths are rounded down to a multiple of 4 as og_pb_F does (a no-op after it;
+     * kept so that no resize of a tall clip ever gets an odd split part).
+     * r0-r3, ip (dead here, Canon sets them before use) */
+    ".global og_pb_D\n"
+    ".type og_pb_D, %function\n"
+    ".thumb_func\n"
+    "og_pb_D:\n"
+    "    ldr     r0, [r4]\n"
+    "    ldr     r1, [r4, #4]\n"
+    "    cmp.w   r1, #2160\n"
+    "    bls     9f\n"
+    "    ldr     r2, =og_pb_diag\n"
+    "    ldr     r3, [r2]\n"
+    "    adds    r3, #1\n"
+    "    str     r3, [r2]\n"
+    "    str     r0, [r2, #4]\n"
+    "    str     r1, [r2, #8]\n"
+    "    lsrs    r1, r1, #1\n"
+    "    str     r1, [r4, #4]\n"
+    "    lsls    r0, r0, #1\n"
+    /* the channels: 7 words from r4 + 0x10 {enabled, VRAM w, out w, ...} */
+    "    add.w   r2, r4, #0x10\n"
+    "    movs    r3, #4\n"
+    "7:  ldr.w   ip, [r2]\n"
+    "    cmp.w   ip, #0\n"
+    "    beq     8f\n"
+    "    ldr.w   ip, [r2, #8]\n"
+    "    bic     ip, ip, #3\n"
+    "    str.w   ip, [r2, #8]\n"
+    "8:  adds    r2, #0x1c\n"
+    "    subs    r3, #1\n"
+    "    bne     7b\n"
+    "9:  str     r0, [sp]\n"
+    "    str     r1, [sp, #4]\n"
+    "    bx      lr\n"
+    ".ltorg\n"
+    ".arm\n"            /* the CPU stays cortex-a9: GAS checks the Thumb-2 constants above at
+                         * the end of the file (ARMv5TE code assembles the same) */
+);
+
+static void (* const og_pb_fn[])(void) = { og_pb_K, og_pb_N, og_pb_W, og_pb_R, og_pb_D, og_pb_T, og_pb_F };
+
+static CONFIG_INT("opengate.play", og_pb_ui, 1);   /* menu, saved; ON by default */
+static int og_pb_in;                    /* the patches are in */
+static const char * og_pb_why = "";     /* why the last apply was refused */
+#define OG_PB_N COUNT(og_pb_words)
+static uint32_t og_pb_patch[OG_PB_N];
+static int og_pb_n_patch;
+
+static int og_pb_can_change(void)
+{
+    return !is_play_or_qr_mode() && !RECORDING;
+}
+
+static int og_pb_apply(void)
+{
+    struct og_word w[OG_PB_N];
+    memcpy(w, og_pb_words, sizeof(w));
+    for (int i = 0; i < OG_PB_N; i++)
+        if (w[i].val == OG_PB_RUNTIME && w[i].addr >= OG_PB_JUMPS + 4)
+            w[i].val = (uint32_t) og_pb_fn[(w[i].addr - OG_PB_JUMPS - 4) / 8] | 1;
+    int e = og_apply_words(w, OG_PB_N, og_pb_patch, &og_pb_n_patch);
+    og_log("play: apply %d words: %x (K %x N %x W %x R %x D %x T %x F %x)", OG_PB_N, e,
+           og_pb_fn[0], og_pb_fn[1], og_pb_fn[2], og_pb_fn[3], og_pb_fn[4], og_pb_fn[5], og_pb_fn[6]);
+    if (e) og_pb_why = e == E_PATCH_TOO_MANY_PATCHES ? "Too many ML patches active"
+                     : e == E_PATCH_CANNOT_MALLOC || e == OG_E_NO_PAGES ? "Not enough memory for the patches"
+                     : e == E_PATCH_OLD_VALUE_MISMATCH ? "ROM not stock"
+                     : "ROM patch refused";
+    return !e;
+}
+
+static void og_pb_remove(void)
+{
+    og_unpatch_all(og_pb_patch, &og_pb_n_patch);
+    og_pb_in = 0;
+    og_log("play: removed");
+}
+
+/* worker, og_lock held */
+static void og_pb_step(void)
+{
+    if (og_pb_ui > 1) og_pb_ui = 1;     /* a test mode saved by a test build */
+    if (!og_pb_ui == !og_pb_in || !og_pb_can_change()) return;
+    if (og_pb_in) { og_pb_remove(); return; }
+    if (og_pb_apply())
+    {
+        og_pb_in = 1;
+        og_pb_why = "";
+    }
+    else
+    {
+        og_log("play: refused: %s", og_pb_why);
+        NotifyBox(5000, "Open gate playback turned off:\n%s", og_pb_why);
+        og_pb_ui = 0;
+    }
+}
+
+/* ------------------------------------------------------------------------
+ * playback diagnostics (debug log + playback on), own task. While Canon's player runs:
+ * - every DebugMsg class at store level 1 for 10 s from the PLAY entry and from each new
+ *   tall clip;
+ * - the player's and ORCA's state words (og_dm_watch_list) whenever they change;
+ * - the new lines of Canon's DebugMsg rings appended every 20 ms to one file per boot,
+ *   ML/LOGS/OGRnnn.BIN (nnn counts boots, ML/LOGS/OGSESS.BIN), each PLAY entry and exit
+ *   marked; decoded by player/dmlog.py. The lines are copied with the CPU (cached, so
+ *   coherent with the other core) and the file is closed after each write, so the lines up
+ *   to ~20 ms before a crash stay on the card. The first copy takes the whole ring;
+ * - the og_pb_diag counters logged to OPENGATE.LOG as soon as they change;
+ * - OGDM.ARM exists while playback runs: a session that did not end is logged at boot.
+ * Nothing is patched for this.
+ * ------------------------------------------------------------------------ */
+
+#define RD8(a) (*(volatile uint8_t *)(a))
+#define OG_DM_ALL_MS   10000
+#define OG_DM_TIME     300000           /* capture for 5 min of playback per PLAY entry */
+#define OG_DM_MAX_FILE (96 << 20)       /* and at most 96 MB per boot */
+#define OG_DM_ARM_FILE "ML/LOGS/OGDM.ARM"
+#define OG_DM_SESS     "ML/LOGS/OGSESS.BIN"
+#define OG_DM_REC      (8 + OG_DM_SLOT) /* {u32 ring handle, u16 sub, u16 kind} + slot */
+#define OG_DM_BUF_RECS 700
+static uint8_t og_dm_all_saved[256];
+static int og_dm_all_on;
+static int og_dm_play_since;
+static char og_dm_name[24];
+static uint32_t og_dm_written;
+static uint32_t og_dm_last[3][2];       /* per ring and sub-ring: writes already copied */
+static int og_dm_first;                 /* the next copy takes the whole ring */
+static uint8_t * og_dm_buf;
+
+static void og_dm_all(int on)
+{
+    uint32_t s = og_rd(OG_DM_PTR);
+    if (!og_ram_ok(s, OG_DM_S_LEN) || !og_rd(s + 0x0C) || on == og_dm_all_on) return;
+    if (on)
+        for (int c = 0; c < 256; c++) { og_dm_all_saved[c] = RD8(s + 3 * c + 0x38); RD8(s + 3 * c + 0x38) = 1; }
+    else
+    {
+        og_log("dm: all classes restored (class 1f store level was %d)", RD8(s + 3 * 0x1F + 0x38));
+        for (int c = 0; c < 256; c++) RD8(s + 3 * c + 0x38) = og_dm_all_saved[c];
+    }
+    og_dm_all_on = on;
+}
+
+static int og_file_exists(const char * name)
+{
+    uint32_t size;
+    return FIO_GetFileSize(name, &size) == 0;
+}
+
+/* the counters, logged when they change */
+static void og_pb_diag_watch(void)
+{
+    static struct og_pb_diag seen;
+    struct og_pb_diag d = og_pb_diag;
+    if (!memcmp(&d, &seen, sizeof(d))) return;
+    seen = d;
+    og_log("play: ChkFrameRate pass %d refuse %d (last %dx%d), 4-frame set-ups %d (h %d), fits %d, resize %d (last %dx%d), 2-buffer steps %d",
+           d.k_pass, d.k_refuse, d.k_w, d.k_h, d.n_count, d.n_h, d.fit_count, d.d_count, d.d_w, d.d_h, d.rot_tall);
+}
+
+static void og_dm_append(const void * data, int len)
+{
+    if (!len || og_dm_written + len > OG_DM_MAX_FILE) return;
+    FILE * f = FIO_CreateFileOrAppend(og_dm_name);
+    if (!f) return;
+    FIO_WriteFile(f, data, len);
+    FIO_CloseFile(f);
+    og_dm_written += len;
+}
+
+/* a marker record: kind 1 = PLAY entry, 2 = PLAY exit; slot = {ms, counters} */
+static void og_dm_mark(int kind)
+{
+    uint32_t r[OG_DM_REC / 4] = { 0, kind << 16 };
+    r[2] = get_ms_clock();
+    memcpy(&r[3], &og_pb_diag, MIN(sizeof(og_pb_diag), OG_DM_REC - 12));
+    og_dm_append(r, sizeof(r));
+}
+
+/* copy the ring lines written since the last call (the newest one again: it may have been
+ * half written) into og_dm_buf, then append them */
+static void og_dm_capture(void)
+{
+    uint32_t s = og_rd(OG_DM_PTR);
+    if (!og_dm_buf || !og_ram_ok(s, OG_DM_S_LEN) || !og_rd(s + 0x0C)) return;
+    int nrec = 0;
+    for (int k = 0; k < 3; k++)
+    {
+        uint32_t h, len;
+        if (!(h = og_dm_ring(s, k, &len))) continue;
+        for (int sub = 0; sub < 2; sub++)
+        {
+            uint32_t off = RD32(h + 4 * (2 + 15 * sub)), n = RD32(h + 4 * (4 + 15 * sub));
+            uint32_t base = RD32(h + 4 * (5 + 15 * sub)), cnt = RD32(h + 4 * (6 + 15 * sub));
+            if (!n) continue;
+            uint32_t from = og_dm_first ? (cnt > n ? cnt - n : 0) : og_dm_last[k][sub];
+            if (cnt - from > n) from = cnt - n;                     /* the ring wrapped: lost */
+            uint32_t room = OG_DM_BUF_RECS - nrec;
+            if (cnt - from > room) from = cnt - room;
+            for (uint32_t j = from; j < cnt; j++)
+            {
+                uint8_t * r = og_dm_buf + nrec++ * OG_DM_REC;
+                ((uint32_t *) r)[0] = h;
+                ((uint32_t *) r)[1] = sub;
+                memcpy(r + 8, (void *) (h + off + ((j + base) % n) * OG_DM_SLOT), OG_DM_SLOT);
+            }
+            og_dm_last[k][sub] = cnt ? cnt - 1 : 0;
+        }
+    }
+    og_dm_first = 0;
+    og_dm_append(og_dm_buf, nrec * OG_DM_REC);
+}
+
+/* player and ORCA state words appended (record kind 3: {ms, len, words}) whenever they
+ * change, every capture: what the convert and the resize were given, and the decoded
+ * frames, also when Canon logs nothing at the moment that matters.
+ * base = a RAM word holding the base pointer (0: off is an address) */
+static const struct { uint16_t base, off, len; } og_dm_watch_list[] =
+{
+    { 0,      0xE978, 0x18 },   /* OrcaDS global: +0x10 state, +0x14 state flags */
+    { 0xE988, 0x060,  0x10 },   /* OrcaDS: the 4 resize input words (pitch, rows, region) */
+    { 0xE988, 0x1F0,  0x08 },   /* window cut */
+    { 0xE988, 0x200,  0x4C },   /* convert: In type / w / h, Out pitch ..., field mode */
+    { 0xE988, 0x24C,  0x20 },
+    { 0x9D48, 0x9C0,  0x10 },   /* player: movie info w, h */
+    { 0x9D48, 0x658,  0x4C },   /* decoded frames: count +0x670, records from +0x690 */
+    { 0x9D48, 0x6A4,  0x4C },
+    { 0x9D48, 0x770,  0x4C },   /* convert buffers +0x770 */
+    { 0x9D48, 0x7BC,  0x10 },
+    { 0x9D48, 0x908,  0x14 },   /* convert-buffer indices +0x908 .. +0x918 */
+};
+#define OG_DM_WATCH_N COUNT(og_dm_watch_list)
+static uint32_t og_dm_watch_seen[OG_DM_WATCH_N][0x4C / 4];
+
+static void og_dm_watch(int force)
+{
+    uint32_t r[OG_DM_REC / 4];
+    for (int i = 0; i < (int) OG_DM_WATCH_N; i++)
+    {
+        uint32_t a = og_dm_watch_list[i].off, n = og_dm_watch_list[i].len;
+        if (og_dm_watch_list[i].base)
+        {
+            uint32_t b = og_rd(og_dm_watch_list[i].base);
+            if (!b) continue;
+            a += b;
+        }
+        if (!og_ram_ok(a, n)) continue;
+        if (!force && !memcmp(og_dm_watch_seen[i], (void *) a, n)) continue;
+        memcpy(og_dm_watch_seen[i], (void *) a, n);
+        memset(r, 0, sizeof(r));
+        r[0] = a;
+        r[1] = 3 << 16;
+        r[2] = get_ms_clock();
+        r[3] = n;
+        memcpy(&r[4], og_dm_watch_seen[i], n);
+        og_dm_append(r, sizeof(r));
+    }
+}
+
+static void og_dm_session(void)
+{
+    uint32_t n = 0;
+    FILE * f = FIO_OpenFile(OG_DM_SESS, O_RDONLY | O_SYNC);
+    if (f)
+    {
+        uint32_t * b = fio_malloc(4);
+        if (b && FIO_ReadFile(f, b, 4) == 4) n = *b;
+        if (b) fio_free(b);
+        FIO_CloseFile(f);
+    }
+    n++;
+    f = FIO_CreateFile(OG_DM_SESS);
+    if (f) { FIO_WriteFile(f, &n, 4); FIO_CloseFile(f); }
+    snprintf(og_dm_name, sizeof(og_dm_name), "ML/LOGS/OGR%03d.BIN", n % 1000);
+    uint32_t hdr[4] = { 0x4C52474F, 1, og_rd(OG_DM_PTR), 0 };      /* "OGRL", version, S */
+    og_dm_append(hdr, sizeof(hdr));
+    og_log("dm: playback ring log of this boot: %s", og_dm_name);
+}
+
+static void og_pb_diag_task(void * unused)
+{
+    int boot_checked = 0;
+    TASK_LOOP
+    {
+        int play = og_debug && og_pb_in && is_play_or_qr_mode();
+        msleep(play ? 20 : 200);
+        if (ml_shutdown_requested) break;
+        if (!og_debug) continue;
+        if (!boot_checked)
+        {
+            boot_checked = 1;
+            if (og_file_exists(OG_DM_ARM_FILE))
+            {
+                FIO_RemoveFile(OG_DM_ARM_FILE);
+                og_log("dm: the last playback session did not end (crash or battery pull)");
+            }
+        }
+        if (og_pb_in) og_pb_diag_watch();
+        if (!play)
+        {
+            if (og_dm_play_since)
+            {
+                og_dm_play_since = 0;
+                og_dm_capture();
+                og_dm_mark(2);
+                og_dm_all(0);
+                og_log("dm: playback ended, %d KB in %s", og_dm_written >> 10, og_dm_name);
+                FIO_RemoveFile(OG_DM_ARM_FILE);
+            }
+            continue;
+        }
+        int now = get_ms_clock();
+        static int all_since, clips_seen;
+        int clips = og_pb_diag.k_pass + og_pb_diag.k_refuse + og_pb_diag.n_count;
+        if (!og_dm_play_since)
+        {
+            if (!og_dm_buf) og_dm_buf = malloc(OG_DM_BUF_RECS * OG_DM_REC);
+            if (!og_dm_name[0]) og_dm_session();
+            og_dm_play_since = now;
+            FILE * f = FIO_CreateFile(OG_DM_ARM_FILE);
+            if (f) FIO_CloseFile(f);
+            og_dm_first = 1;
+            og_dm_mark(1);
+            og_dm_watch(1);
+            clips_seen = -1;
+            og_log("dm: playback started");
+        }
+        /* every class at level 1 for 10 s from the PLAY entry and from each new tall clip
+         * (a ChkFrameRate or frame set-up count change) */
+        if (clips != clips_seen)
+        {
+            clips_seen = clips;
+            all_since = now;
+            og_dm_all(1);
+        }
+        if (now - all_since > OG_DM_ALL_MS) og_dm_all(0);
+        if (now - og_dm_play_since <= OG_DM_TIME) { og_dm_capture(); og_dm_watch(0); }
+    }
 }
 
 /* ------------------------------------------------------------------------
@@ -1477,6 +2029,7 @@ static void og_step(void)
     }
     og_observe_setting();
     og_finish_deferred();
+    og_pb_step();
 
     switch (og_state)
     {
@@ -1623,6 +2176,15 @@ static MENU_UPDATE_FUNC(og_update)
         MENU_SET_WARNING(MENU_WARN_INFO, "Recording: changes wait until it stops.");
 }
 
+static MENU_UPDATE_FUNC(og_pb_update)
+{
+    if (!og_pb_ui != !og_pb_in)
+        MENU_SET_WARNING(MENU_WARN_INFO, is_play_or_qr_mode() ? "Takes effect when you leave playback."
+                                                              : "Takes effect when recording stops.");
+    else if (!og_pb_ui && og_pb_why[0])
+        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Turned off: %s", og_pb_why);
+}
+
 static struct menu_entry og_menu[] =
 {
     {
@@ -1635,6 +2197,14 @@ static struct menu_entry og_menu[] =
         .help2   = "4K 25/29.97/23.98p, crop OFF; then photo mode once.",
         .submenu_width = 650,
         .children = (struct menu_entry[]) {
+            {
+                .name   = "Playback",
+                .priv   = &og_pb_ui,
+                .max    = 1,
+                .update = og_pb_update,
+                .help   = "Play open gate clips on the camera, the whole picture.",
+                .help2  = "Works with the open gate mode OFF too. Change it outside playback.",
+            },
             {
                 .name   = "Debug log",
                 .priv   = &og_debug,
@@ -1660,8 +2230,10 @@ static unsigned int og_init(void)
         return CBR_RET_ERROR;
     }
     og_lock = create_named_semaphore("opengate", 1);
+    og_log_lock = create_named_semaphore("opengate_log", 1);
     menu_add("Movie", og_menu, COUNT(og_menu));
     task_create("opengate_task", 0x1a, 0x3000, og_task, 0);
+    task_create("opengate_pbdiag", 0x1a, 0x2000, og_pb_diag_task, 0);
     return 0;
 }
 
@@ -1675,6 +2247,7 @@ static unsigned int og_deinit(void)
     if (take_semaphore(og_lock, 1000) == 0)
     {
         if (og_removal_needed() && og_safe_point()) og_remove();
+        if (og_pb_in && og_pb_can_change()) og_pb_remove();
         give_semaphore(og_lock);
     }
     return 0;
@@ -1685,9 +2258,11 @@ MODULE_INFO_START()
     MODULE_DEINIT(og_deinit)
 MODULE_INFO_END()
 
-/* saved by ML in ML/SETTINGS when the menu closes; the entry itself is not saved (OFF at boot) */
+/* saved by ML in ML/SETTINGS when the menu closes; the open gate entry itself is not saved
+ * (OFF at boot), the playback entry is */
 MODULE_CONFIGS_START()
     MODULE_CONFIG(og_debug)
+    MODULE_CONFIG(og_pb_ui)
     MODULE_CONFIG(og_saved_col)
     MODULE_CONFIG(og_saved_vm0)
     MODULE_CONFIG(og_saved_vm1)

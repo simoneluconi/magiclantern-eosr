@@ -16,7 +16,7 @@ fork brings it to the R6, with extra video features.
 
 | | Feature | What you get |
 |---|---|---|
-| 🎞️ | **Open&nbsp;gate&nbsp;4K** | Record the **whole sensor height**: 4096x2736 in 3:2, or 3840x2880 in 4:3 for anamorphic lenses. HEVC 4:2:2 10-bit with Canon Log, or H.264. 25p, 29.97p, 23.98p. Play the clips on a computer. *Module, experimental.* |
+| 🎞️ | **Open&nbsp;gate&nbsp;4K** | Record the **whole sensor height**: 4096x2736 in 3:2, or 3840x2880 in 4:3 for anamorphic lenses. HEVC 4:2:2 10-bit with Canon Log, or H.264. 25p, 29.97p, 23.98p. The clips play on the camera too, whole picture. *Module, experimental.* |
 | 🔭 | **Anamorphic&nbsp;preview** | See your anamorphic lens **desqueezed** on the screen and in the viewfinder, sharp and smooth, also while recording. 1.25x to 2x, with open gate 4:3 too. |
 | 🎬 | **True&nbsp;24.00p** | Cinema 24.00 fps in 4K UHD, with Canon's own 24.00p setting. *Module, experimental.* |
 | ✂️ | **ALL-I** | Canon's own **For editing (ALL-I)**, hidden on the R6, now in Movie rec. quality: 4K UHD and FHD up to 30p, also in Canon Log. 4K is 470 Mbps, use a V90 card. |
@@ -32,7 +32,8 @@ used one at a time. Their limits are in their own info screen on the camera.
 
 The whole sensor height in one frame: frame it once, then crop the same clip for widescreen,
 square and vertical. With an anamorphic lens, choose 4:3: 3840x2880 from the full sensor height,
-ready to desqueeze in post. **Display > Anamorphic** shows it desqueezed while you shoot.
+ready to desqueeze in post. **Display > Anamorphic** shows it desqueezed while you shoot, and
+the clips play back on the camera with the whole picture.
 
 <p align="center"><img src="docs/r6/img/open-gate-frame.jpg" alt="An open gate 4K frame from the R6, 4096x2736, with 16:9, 1:1 and 9:16 framings inside it" width="800"><br>
 <em>One open gate frame from the R6: 4096x2736, with room for 16:9, 1:1 and 9:16.</em></p>

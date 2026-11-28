@@ -12,8 +12,10 @@ Canon Log, or H.264.
   go to photo mode once: a box reminds you.
 - Change size or frame rate in Canon's MENU. Turn it OFF before using
   the Q menu for them.
-- No HDMI. Play the clips on a computer, not in camera.
+- No HDMI while recording.
 - Not together with fps24.
+- Playback (submenu, ON): plays the clips on the camera, with the
+  whole picture, also with the open gate OFF. Change it outside playback.
 
 Log: ML/LOGS/OPENGATE.LOG
 

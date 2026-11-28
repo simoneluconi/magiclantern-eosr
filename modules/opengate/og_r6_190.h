@@ -348,6 +348,62 @@ static const uint32_t og_win_evf43[12] = { 1280, 960, 1280, 854, 1280, 854, 1136
  * Reserved by mmu_reserve_pages_for_patches() (core) for the patch list itself; the core
  * allocates in blocks of a few pages (one ~710 KB block failed once, RESULTS run 42). */
 
+/* ---- Canon's player and the open gate clips (research/opengate/player/PLAYER-2736-v2.md;
+ * words from player/pbwords.py, every stock value checked there and again before patching).
+ * Only clips taller than 2160 rows take a new path; every other clip runs Canon's code with
+ * Canon's values. The decisions are made by small functions in the module (opengate.c,
+ * og_pb_*), reached through 8-byte jumps placed in MVP_GetMovieSize E04EF1F4 (no caller):
+ * - K: ChkFrameRate lets 4096x2736 and 3840x2880 through (2160 rows as before);
+ * - P2 / P2b: the playback size index maps 4096 / 3840 x any height to the DCI / UHD index
+ *   (else an assert, MovPlayer.c 0x1373 / 0x1377); also used by frame grab and trim;
+ * - T: "Compress & save" is refused for clips taller than 2160 rows, as Canon refuses DCI
+ *   (its time estimate asserts on 3840x2880): MVP_CheckTransCodeFile reads the width 4096
+ *   for them, so Canon's own DCI compare refuses;
+ * - N: 4 decoded frames instead of 6 (6 tall frames do not fit Canon's buffers);
+ * - W / R: 2 convert buffers instead of 3 (the third would overlap the decoded frames);
+ * - D: the resize reads every second line of the whole frame (pitch 2w, rows h/2), so its
+ *   2x2 split parts are smaller than a DCI clip's;
+ * - F: Canon's display fit, then the output widths rounded down to a multiple of 4, for the
+ *   resize and the display alike: the split halves the width, and a part of odd width kills
+ *   the camera (3:2 in the 900x600 LCD box: 898 -> 896).
+ * Pages E0400000, E0410000, E04E0000 (section E04). */
+#define OG_PB_VENEER        0xF000F8DF      /* ldr.w pc, [pc, #0]: jump to the next word */
+#define OG_PB_RUNTIME       0               /* stock marks a veneer target: the module function */
+static const struct og_word og_pb_words[] =
+{
+    { 0xE0401B84, 0x61A82006, 0xFB3AF0ED, 1, "OG play: decoded frames (bl N)" },
+    { 0xE04035B8, 0x5FFFE92D, 0xBE34F0EB, 1, "OG play: display fit (b.w F)" },
+    { 0xE0407CFC, 0xF8D46141, 0xF0E76141, 1, "OG play: convert buffers, producer (bl W)" },
+    { 0xE0407D00, 0x1C400908, 0xBF00FA81, 1, "OG play: convert buffers, producer" },
+    { 0xE0408484, 0x21036101, 0xF0E66101, 1, "OG play: convert buffers, consumer (bl R)" },
+    { 0xE0408488, 0x0914F8D4, 0xBF00FEC1, 1, "OG play: convert buffers, consumer" },
+    { 0xE041BEA4, 0x6820F961, 0xF0D3F961, 1, "OG play: resize input (bl D)" },
+    { 0xE041BEA8, 0x68609000, 0xBF00F9B5, 1, "OG play: resize input" },
+    { 0xE041BEAC, 0x6AB89001, 0x6AB8BF00, 1, "OG play: resize input" },
+    { 0xE04EB9D0, 0xD12942A1, 0xFC10F003, 1, "OG play: ChkFrameRate 3840 (bl K)" },
+    { 0xE04EB9F8, 0xD11542A1, 0xFBFCF003, 1, "OG play: ChkFrameRate 4096 (bl K)" },
+    { 0xE04EF1F4, 0xF04FB510, OG_PB_VENEER, 1, "OG play: jump K" },
+    { 0xE04EF1F8, 0x680034FF, OG_PB_RUNTIME, 1, "OG play: jump K" },
+    { 0xE04EF1FC, 0x19C0F8D0, OG_PB_VENEER, 1, "OG play: jump N" },
+    { 0xE04EF200, 0x6F70F5B1, OG_PB_RUNTIME, 1, "OG play: jump N" },
+    { 0xE04EF204, 0xF5B1D003, OG_PB_VENEER, 1, "OG play: jump W" },
+    { 0xE04EF208, 0xD0076FF0, OG_PB_RUNTIME, 1, "OG play: jump W" },
+    { 0xE04EF20C, 0xF8D0E00C, OG_PB_VENEER, 1, "OG play: jump R" },
+    { 0xE04EF210, 0xF5B119C4, OG_PB_RUNTIME, 1, "OG play: jump R" },
+    { 0xE04EF214, 0xD1076F07, OG_PB_VENEER, 1, "OG play: jump D" },
+    { 0xE04EF218, 0xE0052401, OG_PB_RUNTIME, 1, "OG play: jump D" },
+    { 0xE04EF21C, 0x19C4F8D0, OG_PB_VENEER, 1, "OG play: jump T" },
+    { 0xE04EF220, 0x6F87F5B1, OG_PB_RUNTIME, 1, "OG play: jump T" },
+    { 0xE04EF224, 0x2400D100, OG_PB_VENEER, 1, "OG play: jump F" },
+    { 0xE04EF228, 0x21037900, OG_PB_RUNTIME, 1, "OG play: jump F" },
+    { 0xE04EF888, 0x39C0F8D0, 0xFCC8F7FF, 1, "OG play: no Compress & save above 2160 rows (bl T)" },
+    { 0xE04EFB84, 0x2000D005, 0x2000E005, 1, "OG play: size index 4096 x any" },
+    { 0xE04EFB98, 0x2000D005, 0x2000E005, 1, "OG play: size index 3840 x any" },
+};
+#define OG_PB_JUMPS         0xE04EF1F4      /* first veneer; 7 of 8 bytes, in og_pb_fn[] order */
+#define OG_PB_FIT_RET       0xE04035BD      /* the display fit after its push.w (Thumb) */
+#define OG_PB_REFUSE        0xE04EBA29      /* ChkFrameRate: "W=%ld,H=%ld", return 1 (Thumb) */
+
 /* the fps24 module patches this word (Canon's 24.00p row caption, stock 0) */
 #define OG_FPS24_ROW_WORD 0xE1F107D0
 
